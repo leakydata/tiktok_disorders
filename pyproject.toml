@@ -20,8 +20,14 @@ dependencies = [
   "seaborn>=0.13.0",
   "python-dotenv>=1.0.0",
   "requests>=2.31.0",
+  "torch>=2.1.0",
 ]
 
 [project.optional-dependencies]
 openai-whisper = ["openai-whisper>=20231117"]
 umap = ["umap-learn>=0.5.5"]
+
+[tool.uv]
+# Install PyTorch with CUDA 12.1 support for RTX 4090
+extra-index-url = ["https://download.pytorch.org/whl/cu121"]
+index-strategy = "unsafe-best-match"
