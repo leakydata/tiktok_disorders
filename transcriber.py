@@ -32,9 +32,14 @@ from database import insert_transcript, get_video_by_id, get_transcript
 
 
 class AudioTranscriber:
-    """Transcribes audio files using OpenAI Whisper with GPU acceleration."""
+    """Transcribes audio files using Whisper with GPU acceleration."""
 
-    def __init__(self, model_size: Optional[str] = None, device: Optional[str] = None):
+    def __init__(
+        self,
+        model_size: Optional[str] = None,
+        device: Optional[str] = None,
+        backend: Optional[str] = None,
+    ):
         """
         Initialize the transcriber.
 
@@ -44,13 +49,34 @@ class AudioTranscriber:
             device: Device to use ('cuda' or 'cpu'). Auto-detects if not specified.
         """
         self.model_size = model_size or WHISPER_MODEL
-        self.device = device or ('cuda' if torch.cuda.is_available() else 'cpu')
+        self.backend = (backend or TRANSCRIBER_BACKEND).lower()
+        if self.backend not in {'faster-whisper', 'openai-whisper'}:
+            raise ValueError("backend must be 'faster-whisper' or 'openai-whisper'")
 
-        print(f"Loading Whisper model '{self.model_size}' on {self.device}...")
-        self.model = whisper.load_model(self.model_size, device=self.device)
+        if device:
+            self.device = device
+        else:
+            self.device = 'cuda' if torch and torch.cuda.is_available() else 'cpu'
+
+        print(f"Loading Whisper model '{self.model_size}' on {self.device} ({self.backend})...")
+        if self.backend == 'faster-whisper':
+            if FasterWhisperModel is None:
+                raise ImportError("faster-whisper is not installed")
+            compute_type = WHISPER_COMPUTE_TYPE
+            if compute_type == 'auto':
+                compute_type = 'float16' if self.device == 'cuda' else 'int8'
+            self.model = FasterWhisperModel(
+                self.model_size,
+                device=self.device,
+                compute_type=compute_type,
+            )
+        else:
+            if openai_whisper is None:
+                raise ImportError("openai-whisper is not installed")
+            self.model = openai_whisper.load_model(self.model_size, device=self.device)
 
         # Display GPU info if using CUDA
-        if self.device == 'cuda':
+        if self.device == 'cuda' and torch:
             gpu_name = torch.cuda.get_device_name(0)
             gpu_memory = torch.cuda.get_device_properties(0).total_memory / 1024**3
             print(f"✓ Using GPU: {gpu_name} ({gpu_memory:.1f} GB)")
