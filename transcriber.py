@@ -1,15 +1,33 @@
 """
-Advanced audio transcription module using OpenAI Whisper.
+Advanced audio transcription module using Whisper.
 Optimized for GPU acceleration (RTX 4090) with support for large models.
 """
-import whisper
-import torch
+try:
+    import torch
+except ImportError:
+    torch = None
+
+try:
+    from faster_whisper import WhisperModel as FasterWhisperModel
+except ImportError:
+    FasterWhisperModel = None
+
+try:
+    import whisper as openai_whisper
+except ImportError:
+    openai_whisper = None
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 import json
 from datetime import datetime
 
-from config import TRANSCRIPT_DIR, WHISPER_MODEL, ensure_directories
+from config import (
+    TRANSCRIPT_DIR,
+    WHISPER_MODEL,
+    TRANSCRIBER_BACKEND,
+    WHISPER_COMPUTE_TYPE,
+    ensure_directories,
+)
 from database import insert_transcript, get_video_by_id, get_transcript
 
 
