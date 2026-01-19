@@ -65,6 +65,7 @@ DATABASE_URL=postgresql://username:password@localhost:5432/tiktok_disorders
 ANTHROPIC_API_KEY=sk-ant-...
 EXTRACTOR_PROVIDER=ollama
 OLLAMA_MODEL=gpt-oss:20b
+OLLAMA_URL=http://localhost:11434
 ```
 
 ### 5. Initialize the database schema

@@ -171,7 +171,7 @@ Return ONLY the JSON array, no additional text."""
             }
 
         except json.JSONDecodeError as e:
-            print(f"✗ Failed to parse Claude response: {e}")
+            print(f"✗ Failed to parse model response: {e}")
             print(f"Response text: {response_text[:500]}...")
             return {
                 'video_id': video_id,

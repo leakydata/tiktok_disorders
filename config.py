@@ -32,6 +32,8 @@ VISUALIZATION_DIR = Path(os.getenv('VISUALIZATION_DIR', DATA_DIR / 'visualizatio
 # Whisper Model Configuration
 WHISPER_MODEL = os.getenv('WHISPER_MODEL', 'base')
 WHISPER_MODELS = ['tiny', 'base', 'small', 'medium', 'large']
+TRANSCRIBER_BACKEND = os.getenv('TRANSCRIBER_BACKEND', 'faster-whisper')
+WHISPER_COMPUTE_TYPE = os.getenv('WHISPER_COMPUTE_TYPE', 'auto')
 
 # Analysis Configuration
 MIN_CONFIDENCE_SCORE = float(os.getenv('MIN_CONFIDENCE_SCORE', '0.6'))
@@ -57,6 +59,9 @@ def validate_config():
 
     if EXTRACTOR_PROVIDER == 'anthropic' and not ANTHROPIC_API_KEY:
         errors.append("ANTHROPIC_API_KEY is not set")
+
+    if TRANSCRIBER_BACKEND not in {'faster-whisper', 'openai-whisper'}:
+        errors.append("TRANSCRIBER_BACKEND must be 'faster-whisper' or 'openai-whisper'")
 
     if WHISPER_MODEL not in WHISPER_MODELS:
         errors.append(f"WHISPER_MODEL must be one of {WHISPER_MODELS}")
