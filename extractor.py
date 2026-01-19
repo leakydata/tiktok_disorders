@@ -71,34 +71,54 @@ class SymptomExtractor:
         self.max_workers = max_workers
 
     def _build_extraction_prompt(self, transcript: str) -> str:
-        """Build the prompt for the model to extract symptoms."""
+        """Build the prompt for the model to extract symptoms with enhanced research data."""
         categories_str = "\n".join([f"- {cat}: {desc}" for cat, desc in SYMPTOM_CATEGORIES.items()])
 
         return f"""You are a medical research assistant analyzing a transcript about chronic illnesses (EDS, MCAS, POTS).
 
-Extract ALL mentioned symptoms from the following transcript. For each symptom:
-1. Identify the specific symptom or complaint
-2. Categorize it using one of these categories:
+Extract ALL mentioned symptoms from the following transcript. For each symptom, provide:
+
+1. **symptom**: Brief description of the symptom or complaint
+2. **category**: One of these categories:
 {categories_str}
 
-3. Assign a confidence score (0.0-1.0) based on:
+3. **confidence** (0.0-1.0):
    - 1.0: Explicitly stated by the speaker as their personal experience
    - 0.8-0.9: Strongly implied or clearly described
    - 0.6-0.7: Mentioned but with less detail or certainty
    - 0.4-0.5: Vaguely referenced or possibly relevant
    - Below 0.4: Not worth recording
 
-4. Include surrounding context (the sentence or phrase where it was mentioned)
+4. **severity**: One of: "mild", "moderate", "severe", "unspecified"
+   - Based on how the speaker describes the impact on their life
 
-Return your response as a JSON array of objects with this structure:
+5. **temporal_pattern**: One of: "acute", "chronic", "intermittent", "progressive", "unspecified"
+   - acute: sudden onset, short duration
+   - chronic: long-lasting, persistent
+   - intermittent: comes and goes
+   - progressive: getting worse over time
+
+6. **body_location**: Specific body part if mentioned (e.g., "knees", "lower back", "hands")
+
+7. **triggers**: Array of triggers if mentioned (e.g., ["standing", "heat", "certain foods"])
+
+8. **is_personal_experience**: true if speaker describes their own experience, false if discussing general information
+
+9. **context**: The relevant quote from the transcript
+
+Return your response as a JSON array:
 [
   {{
-    "symptom": "brief description of the symptom",
-    "category": "category name from the list above",
+    "symptom": "joint hypermobility",
+    "category": "musculoskeletal",
     "confidence": 0.95,
-    "context": "the relevant quote from the transcript"
-  }},
-  ...
+    "severity": "moderate",
+    "temporal_pattern": "chronic",
+    "body_location": "fingers and wrists",
+    "triggers": ["repetitive motion"],
+    "is_personal_experience": true,
+    "context": "my fingers bend way back and my wrists are always giving out"
+  }}
 ]
 
 TRANSCRIPT:
@@ -145,7 +165,7 @@ Return ONLY the JSON array, no additional text."""
 
             symptoms = json.loads(response_text)
 
-            # Validate and save symptoms
+            # Validate and save symptoms with enhanced fields
             saved_count = 0
             for symptom_data in symptoms:
                 confidence = symptom_data.get('confidence', 0.0)
@@ -156,7 +176,14 @@ Return ONLY the JSON array, no additional text."""
                         category=symptom_data.get('category', 'other'),
                         symptom=symptom_data['symptom'],
                         confidence=confidence,
-                        context=symptom_data.get('context')
+                        context=symptom_data.get('context'),
+                        severity=symptom_data.get('severity', 'unspecified'),
+                        temporal_pattern=symptom_data.get('temporal_pattern', 'unspecified'),
+                        body_location=symptom_data.get('body_location'),
+                        triggers=symptom_data.get('triggers', []),
+                        is_personal_experience=symptom_data.get('is_personal_experience', True),
+                        extractor_model=self.model,
+                        extractor_provider=self.provider
                     )
                     saved_count += 1
 
