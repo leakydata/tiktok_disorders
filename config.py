@@ -15,8 +15,12 @@ DATABASE_URL = os.getenv(
     'postgresql://localhost:5433/tiktok_disorders'
 )
 
-# API Keys
+# API Keys / Providers
 ANTHROPIC_API_KEY = os.getenv('ANTHROPIC_API_KEY')
+EXTRACTOR_PROVIDER = os.getenv('EXTRACTOR_PROVIDER', 'anthropic')
+ANTHROPIC_MODEL = os.getenv('ANTHROPIC_MODEL', 'claude-opus-4-5-20251101')
+OLLAMA_URL = os.getenv('OLLAMA_URL', 'http://localhost:11434')
+OLLAMA_MODEL = os.getenv('OLLAMA_MODEL', 'gpt-oss:20b')
 
 # Data Directories
 BASE_DIR = Path(__file__).parent
@@ -48,7 +52,10 @@ def validate_config():
     """Validate required configuration is present."""
     errors = []
 
-    if not ANTHROPIC_API_KEY:
+    if EXTRACTOR_PROVIDER not in {'anthropic', 'ollama'}:
+        errors.append("EXTRACTOR_PROVIDER must be 'anthropic' or 'ollama'")
+
+    if EXTRACTOR_PROVIDER == 'anthropic' and not ANTHROPIC_API_KEY:
         errors.append("ANTHROPIC_API_KEY is not set")
 
     if WHISPER_MODEL not in WHISPER_MODELS:
