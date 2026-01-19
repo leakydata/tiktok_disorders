@@ -1,0 +1,23 @@
+# Example URLs file for the research pipeline
+# Add one video URL per line
+# Lines starting with # are ignored
+
+# Example YouTube URLs (replace with actual research videos):
+# https://www.youtube.com/watch?v=example1
+# https://www.youtube.com/watch?v=example2
+
+# Example TikTok URLs:
+# https://www.tiktok.com/@username/video/1234567890
+
+# You can also add comments to organize your URLs:
+# === EDS-focused videos ===
+# URL1
+# URL2
+
+# === POTS-focused videos ===
+# URL3
+# URL4
+
+# === MCAS-focused videos ===
+# URL5
+# URL6
