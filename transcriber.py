@@ -120,32 +120,56 @@ class AudioTranscriber:
             raise FileNotFoundError(f"Audio file not found: {audio_path}")
 
         print(f"Transcribing: {audio_path}")
-        print(f"Using model: {self.model_size} on {self.device}")
+        print(f"Using model: {self.model_size} on {self.device} ({self.backend})")
 
-        # Transcribe with advanced options
-        # For RTX 4090, we can use aggressive settings
-        transcribe_options = {
-            'language': language,
-            'task': 'transcribe',
-            'temperature': temperature,
-            'best_of': 5 if temperature > 0 else 1,  # Multiple samples for non-zero temperature
-            'beam_size': 5,  # Larger beam search for better quality
-            'patience': 1.0,
-            'length_penalty': 1.0,
-            'suppress_tokens': "-1",
-            'initial_prompt': "This is a video about chronic illness, specifically EDS, MCAS, or POTS. The speaker may discuss medical symptoms.",
-            'condition_on_previous_text': True,
-            'fp16': self.device == 'cuda',  # Use half precision on GPU for speed
-            'verbose': True,
-            **kwargs
-        }
+        if self.backend == 'faster-whisper':
+            segments_iter, info = self.model.transcribe(
+                str(audio_path),
+                language=language,
+                beam_size=5,
+                temperature=temperature,
+                **kwargs,
+            )
 
-        result = self.model.transcribe(str(audio_path), **transcribe_options)
+            segment_items = []
+            text_parts = []
+            for segment in segments_iter:
+                text_parts.append(segment.text)
+                if save_segments:
+                    segment_items.append({
+                        'start': float(segment.start),
+                        'end': float(segment.end),
+                        'text': segment.text
+                    })
 
-        # Extract results
-        text = result['text'].strip()
-        detected_language = result['language']
-        segments = result.get('segments', []) if save_segments else None
+            text = " ".join(text_parts).strip()
+            detected_language = info.language if info and info.language else (language or 'unknown')
+            segments = segment_items if save_segments else None
+        else:
+            # Transcribe with advanced options
+            # For RTX 4090, we can use aggressive settings
+            transcribe_options = {
+                'language': language,
+                'task': 'transcribe',
+                'temperature': temperature,
+                'best_of': 5 if temperature > 0 else 1,  # Multiple samples for non-zero temperature
+                'beam_size': 5,  # Larger beam search for better quality
+                'patience': 1.0,
+                'length_penalty': 1.0,
+                'suppress_tokens': "-1",
+                'initial_prompt': "This is a video about chronic illness, specifically EDS, MCAS, or POTS. The speaker may discuss medical symptoms.",
+                'condition_on_previous_text': True,
+                'fp16': self.device == 'cuda',  # Use half precision on GPU for speed
+                'verbose': True,
+                **kwargs
+            }
+
+            result = self.model.transcribe(str(audio_path), **transcribe_options)
+
+            # Extract results
+            text = result['text'].strip()
+            detected_language = result['language']
+            segments = result.get('segments', []) if save_segments else None
 
         # Save to file
         output_filename = f"transcript_{video_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
@@ -156,6 +180,7 @@ class AudioTranscriber:
             'text': text,
             'language': detected_language,
             'model': self.model_size,
+            'backend': self.backend,
             'device': self.device,
             'segments': segments,
             'transcribed_at': datetime.now().isoformat()
