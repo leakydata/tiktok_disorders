@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tiktok-disorders"
+version = "0.1.0"
+description = "Research pipeline to collect and analyze videos about EDS/MCAS/POTS."
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+  "psycopg2-binary>=2.9.9",
+  "yt-dlp>=2023.12.30",
+  "anthropic>=0.18.0",
+  "openai-whisper>=20231117",
+  "scikit-learn>=1.3.2",
+  "pandas>=2.1.4",
+  "numpy>=1.26.2",
+  "matplotlib>=3.8.2",
+  "seaborn>=0.13.0",
+  "python-dotenv>=1.0.0",
+  "requests>=2.31.0",
+]

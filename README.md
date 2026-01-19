@@ -26,7 +26,10 @@ The project consists of seven main modules:
 ## Installation
 
 ```bash
-# Install dependencies
+# Install dependencies with uv (recommended)
+uv sync
+
+# Or with pip
 pip install -r requirements.txt
 
 # Set up environment variables
@@ -41,34 +44,34 @@ cp .env.example .env
 createdb tiktok_disorders
 
 # Initialize schema
-python -c "from database import init_db; init_db()"
+uv run python -c "from database import init_db; init_db()"
 ```
 
 ## Usage
 
 ### Download videos
 ```bash
-python scripts/download.py --url "https://youtube.com/watch?v=..." --tags "EDS,POTS"
+uv run python scripts/download.py --url "https://youtube.com/watch?v=..." --tags "EDS,POTS"
 ```
 
 ### Transcribe audio
 ```bash
-python scripts/transcribe.py --video-id <id> --model base
+uv run python scripts/transcribe.py --video-id <id> --model base
 ```
 
 ### Extract symptoms
 ```bash
-python scripts/extract_symptoms.py --video-id <id>
+uv run python scripts/extract_symptoms.py --video-id <id>
 ```
 
 ### Analyze patterns
 ```bash
-python scripts/analyze.py --min-videos 10
+uv run python scripts/analyze.py --min-videos 10
 ```
 
 ### Run complete pipeline
 ```bash
-python scripts/run_pipeline.py --urls urls.txt
+uv run python scripts/run_pipeline.py --urls urls.txt
 ```
 
 ## Configuration

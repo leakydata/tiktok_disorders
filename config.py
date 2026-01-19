@@ -12,7 +12,7 @@ load_dotenv()
 # Database Configuration
 DATABASE_URL = os.getenv(
     'DATABASE_URL',
-    'postgresql://localhost:5432/tiktok_disorders'
+    'postgresql://localhost:5433/tiktok_disorders'
 )
 
 # API Keys
