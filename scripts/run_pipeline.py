@@ -31,6 +31,12 @@ def main():
                        help='Minimum confidence for symptoms (default: 0.6)')
     parser.add_argument('--no-parallel', action='store_true',
                        help='Disable parallel extraction')
+    parser.add_argument('--provider', choices=['anthropic', 'ollama'],
+                       help='Model provider (default: from EXTRACTOR_PROVIDER)')
+    parser.add_argument('--model',
+                       help='Model name (default: provider-specific)')
+    parser.add_argument('--ollama-url',
+                       help='Ollama base URL (default: from OLLAMA_URL)')
     parser.add_argument('--cluster-method', choices=['kmeans', 'dbscan'], default='kmeans',
                        help='Clustering method for analysis')
     parser.add_argument('--viz-method', choices=['pca', 'tsne', 'umap'], default='umap',
@@ -49,11 +55,18 @@ def main():
     print(f"  Whisper model: {args.whisper_model}")
     print(f"  Min confidence: {args.min_confidence}")
     print(f"  Parallel extraction: {not args.no_parallel}")
+    if args.provider:
+        print(f"  Provider: {args.provider}")
+    if args.model:
+        print(f"  Model: {args.model}")
 
     pipeline = ResearchPipeline(
         whisper_model=args.whisper_model,
         min_confidence=args.min_confidence,
-        parallel_extraction=not args.no_parallel
+        parallel_extraction=not args.no_parallel,
+        extractor_provider=args.provider,
+        extractor_model=args.model,
+        ollama_url=args.ollama_url,
     )
 
     try:
