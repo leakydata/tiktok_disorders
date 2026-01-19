@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Extract symptoms from transcripts using Claude API.
+Extract symptoms from transcripts using Claude or Ollama.
 
 Usage:
     python scripts/extract_symptoms.py --video-id 1
@@ -26,6 +26,12 @@ def main():
                        help='Minimum confidence score to save (default: 0.6)')
     parser.add_argument('--max-workers', type=int, default=10,
                        help='Max parallel workers (default: 10)')
+    parser.add_argument('--provider', choices=['anthropic', 'ollama'],
+                       help='Model provider (default: from EXTRACTOR_PROVIDER)')
+    parser.add_argument('--model',
+                       help='Model name (default: provider-specific)')
+    parser.add_argument('--ollama-url',
+                       help='Ollama base URL (default: from OLLAMA_URL)')
 
     args = parser.parse_args()
 
@@ -33,7 +39,12 @@ def main():
         parser.error("Either --video-id or --all is required")
 
     # Initialize extractor
-    extractor = SymptomExtractor(max_workers=args.max_workers)
+    extractor = SymptomExtractor(
+        max_workers=args.max_workers,
+        provider=args.provider,
+        model=args.model,
+        ollama_url=args.ollama_url,
+    )
 
     try:
         if args.video_id:

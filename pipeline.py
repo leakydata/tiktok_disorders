@@ -21,7 +21,10 @@ class ResearchPipeline:
     def __init__(self,
                  whisper_model: str = 'large-v3',
                  min_confidence: float = 0.6,
-                 parallel_extraction: bool = True):
+                 parallel_extraction: bool = True,
+                 extractor_provider: Optional[str] = None,
+                 extractor_model: Optional[str] = None,
+                 ollama_url: Optional[str] = None):
         """
         Initialize the pipeline.
 
@@ -32,7 +35,12 @@ class ResearchPipeline:
         """
         self.downloader = VideoDownloader()
         self.transcriber = AudioTranscriber(model_size=whisper_model)
-        self.extractor = SymptomExtractor(max_workers=10 if parallel_extraction else 1)
+        self.extractor = SymptomExtractor(
+            max_workers=10 if parallel_extraction else 1,
+            provider=extractor_provider,
+            model=extractor_model,
+            ollama_url=ollama_url,
+        )
         self.analyzer = SymptomAnalyzer(min_confidence=min_confidence)
 
         self.stats = {
