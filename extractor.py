@@ -1,15 +1,23 @@
 """
-Symptom extraction module using Claude API.
+Symptom extraction module using Claude or Ollama.
 Analyzes transcripts to identify and categorize symptoms with confidence scores.
 Optimized for high-throughput parallel processing.
 """
 import anthropic
+import requests
 from typing import Dict, Any, List, Optional
 import json
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from config import ANTHROPIC_API_KEY, MIN_CONFIDENCE_SCORE
+from config import (
+    ANTHROPIC_API_KEY,
+    ANTHROPIC_MODEL,
+    EXTRACTOR_PROVIDER,
+    MIN_CONFIDENCE_SCORE,
+    OLLAMA_MODEL,
+    OLLAMA_URL,
+)
 from database import insert_symptom, get_transcript, get_video_by_id
 
 
@@ -29,9 +37,16 @@ SYMPTOM_CATEGORIES = {
 
 
 class SymptomExtractor:
-    """Extracts symptoms from transcripts using Claude API."""
+    """Extracts symptoms from transcripts using Claude or Ollama."""
 
-    def __init__(self, api_key: Optional[str] = None, max_workers: int = 10):
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        max_workers: int = 10,
+        provider: Optional[str] = None,
+        model: Optional[str] = None,
+        ollama_url: Optional[str] = None,
+    ):
         """
         Initialize the symptom extractor.
 
@@ -39,15 +54,24 @@ class SymptomExtractor:
             api_key: Anthropic API key (defaults to config.ANTHROPIC_API_KEY)
             max_workers: Maximum parallel API calls (with 389GB RAM, we can handle many!)
         """
-        self.api_key = api_key or ANTHROPIC_API_KEY
-        if not self.api_key:
-            raise ValueError("ANTHROPIC_API_KEY is required")
+        self.provider = (provider or EXTRACTOR_PROVIDER).lower()
+        if self.provider not in {"anthropic", "ollama"}:
+            raise ValueError("provider must be 'anthropic' or 'ollama'")
 
-        self.client = anthropic.Anthropic(api_key=self.api_key)
+        self.api_key = api_key or ANTHROPIC_API_KEY
+        self.model = model or (ANTHROPIC_MODEL if self.provider == "anthropic" else OLLAMA_MODEL)
+        self.ollama_url = (ollama_url or OLLAMA_URL).rstrip("/")
+
+        if self.provider == "anthropic":
+            if not self.api_key:
+                raise ValueError("ANTHROPIC_API_KEY is required for Anthropic")
+            self.client = anthropic.Anthropic(api_key=self.api_key)
+        else:
+            self.client = None
         self.max_workers = max_workers
 
     def _build_extraction_prompt(self, transcript: str) -> str:
-        """Build the prompt for Claude to extract symptoms."""
+        """Build the prompt for the model to extract symptoms."""
         categories_str = "\n".join([f"- {cat}: {desc}" for cat, desc in SYMPTOM_CATEGORIES.items()])
 
         return f"""You are a medical research assistant analyzing a transcript about chronic illnesses (EDS, MCAS, POTS).
@@ -109,20 +133,9 @@ Return ONLY the JSON array, no additional text."""
 
         print(f"Extracting symptoms from video {video_id} ({len(transcript_text)} chars)...")
 
-        # Call Claude API
+        # Call model API
         try:
-            response = self.client.messages.create(
-                model="claude-opus-4-5-20251101",  # Use the most capable model
-                max_tokens=4096,
-                temperature=0.0,  # Deterministic for consistency
-                messages=[{
-                    "role": "user",
-                    "content": self._build_extraction_prompt(transcript_text)
-                }]
-            )
-
-            # Parse response
-            response_text = response.content[0].text.strip()
+            response_text = self._call_model(self._build_extraction_prompt(transcript_text))
 
             # Extract JSON from response (in case there's extra text)
             if '```json' in response_text:
@@ -173,6 +186,36 @@ Return ONLY the JSON array, no additional text."""
                 'success': False,
                 'error': str(e)
             }
+
+    def _call_model(self, prompt: str) -> str:
+        if self.provider == "anthropic":
+            response = self.client.messages.create(
+                model=self.model,
+                max_tokens=4096,
+                temperature=0.0,
+                messages=[{
+                    "role": "user",
+                    "content": prompt
+                }]
+            )
+            return response.content[0].text.strip()
+
+        response = requests.post(
+            f"{self.ollama_url}/api/chat",
+            json={
+                "model": self.model,
+                "messages": [{"role": "user", "content": prompt}],
+                "stream": False,
+            },
+            timeout=120,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        message = payload.get("message", {})
+        content = message.get("content")
+        if not content:
+            raise ValueError("Ollama response missing message content")
+        return str(content).strip()
 
     def extract_batch(self, video_ids: List[int], min_confidence: Optional[float] = None,
                      parallel: bool = True) -> List[Dict[str, Any]]:
