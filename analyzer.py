@@ -6,8 +6,12 @@ import numpy as np
 import pandas as pd
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.cluster import KMeans, DBSCAN, AgglomerativeClustering
-from sklearn.decomposition import PCA, TSNE
-from sklearn.manifold import UMAP
+from sklearn.decomposition import PCA
+from sklearn.manifold import TSNE
+try:
+    from umap import UMAP
+except ImportError:
+    UMAP = None
 from sklearn.preprocessing import StandardScaler
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -243,6 +247,8 @@ class SymptomAnalyzer:
 
         elif method == 'umap':
             # UMAP: best of both worlds - fast and high quality
+            if UMAP is None:
+                raise ImportError("UMAP is not installed. Add 'umap-learn' to use method='umap'.")
             reducer = UMAP(
                 n_components=n_components,
                 random_state=42,

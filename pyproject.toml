@@ -24,3 +24,4 @@ dependencies = [
 
 [project.optional-dependencies]
 openai-whisper = ["openai-whisper>=20231117"]
+umap = ["umap-learn>=0.5.5"]

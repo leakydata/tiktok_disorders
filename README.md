@@ -77,6 +77,13 @@ uv run python scripts/analyze.py --min-videos 10
 uv run python scripts/run_pipeline.py --urls urls.txt
 ```
 
+### Backfill database from existing transcripts
+```bash
+uv run python scripts/backfill_transcripts.py --dir data/transcripts
+# Optionally extract symptoms after backfill
+uv run python scripts/backfill_transcripts.py --dir data/transcripts --extract --provider ollama --model gpt-oss:20b
+```
+
 ### Use Ollama for extraction (local testing)
 ```bash
 # Option 1: via .env (recommended)
@@ -104,6 +111,11 @@ Configuration is managed through environment variables in `.env`:
 To use the OpenAI Whisper backend, install the optional dependency and set:
 ```
 TRANSCRIBER_BACKEND=openai-whisper
+```
+
+Optional analysis dependencies:
+```
+uv sync --extra umap
 ```
 
 ## Output

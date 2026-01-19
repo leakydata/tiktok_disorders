@@ -19,6 +19,8 @@ cd tiktok_disorders
 uv sync
 # Optional: OpenAI Whisper backend (requires Python < 3.10)
 # uv sync --extra openai-whisper
+# Optional: UMAP visualization support
+# uv sync --extra umap
 ```
 
 ### 2. Install system dependencies
