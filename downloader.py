@@ -2,10 +2,7 @@
 Video and audio downloader module using yt-dlp.
 Supports YouTube, TikTok, and other platforms supported by yt-dlp.
 """
-import sys
 from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).parent))
 
 import yt_dlp
 from typing import Optional, Dict, Any, List

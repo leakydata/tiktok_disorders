@@ -2,13 +2,10 @@
 Complete pipeline orchestration for the EDS/MCAS/POTS research project.
 Coordinates all stages from download to analysis.
 """
-import sys
 from typing import List, Dict, Any, Optional
 from pathlib import Path
 import json
 from datetime import datetime
-
-sys.path.insert(0, str(Path(__file__).parent))
 
 from downloader import VideoDownloader
 from transcriber import AudioTranscriber
