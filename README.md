@@ -74,11 +74,25 @@ uv run python scripts/analyze.py --min-videos 10
 uv run python scripts/run_pipeline.py --urls urls.txt
 ```
 
+### Use Ollama for extraction (local testing)
+```bash
+# Option 1: via .env (recommended)
+# EXTRACTOR_PROVIDER=ollama
+# OLLAMA_MODEL=gpt-oss:20b
+
+# Option 2: per-run flags
+uv run python scripts/run_pipeline.py --urls urls.txt --provider ollama --model gpt-oss:20b
+```
+
 ## Configuration
 
 Configuration is managed through environment variables in `.env`:
 - `DATABASE_URL` - PostgreSQL connection string
 - `ANTHROPIC_API_KEY` - Claude API key for symptom extraction
+- `EXTRACTOR_PROVIDER` - `anthropic` or `ollama` (default: `anthropic`)
+- `ANTHROPIC_MODEL` - Claude model name (default: `claude-opus-4-5-20251101`)
+- `OLLAMA_URL` - Ollama base URL (default: `http://localhost:11434`)
+- `OLLAMA_MODEL` - Ollama model name (default: `gpt-oss:20b`)
 - `AUDIO_DIR` - Directory for storing audio files (default: ./data/audio)
 - `TRANSCRIPT_DIR` - Directory for storing transcripts (default: ./data/transcripts)
 

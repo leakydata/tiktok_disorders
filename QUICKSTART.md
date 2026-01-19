@@ -56,11 +56,15 @@ cp .env.example .env
 Edit `.env` and set:
 - `DATABASE_URL` - Your PostgreSQL connection string
 - `ANTHROPIC_API_KEY` - Your Claude API key
+ - `EXTRACTOR_PROVIDER` - `anthropic` or `ollama`
+ - `OLLAMA_MODEL` - Ollama model name (default: `gpt-oss:20b`)
 
 Example:
 ```
 DATABASE_URL=postgresql://username:password@localhost:5432/tiktok_disorders
 ANTHROPIC_API_KEY=sk-ant-...
+EXTRACTOR_PROVIDER=ollama
+OLLAMA_MODEL=gpt-oss:20b
 ```
 
 ### 5. Initialize the database schema

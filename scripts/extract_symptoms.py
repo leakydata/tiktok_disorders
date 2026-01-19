@@ -6,6 +6,7 @@ Usage:
     python scripts/extract_symptoms.py --video-id 1
     python scripts/extract_symptoms.py --all --parallel
     python scripts/extract_symptoms.py --all --min-confidence 0.7
+    python scripts/extract_symptoms.py --video-id 1 --provider ollama --model gpt-oss:20b
 """
 import sys
 import argparse

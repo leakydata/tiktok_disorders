@@ -6,6 +6,7 @@ Usage:
     python scripts/run_pipeline.py --url "https://youtube.com/watch?v=..."
     python scripts/run_pipeline.py --file urls.txt --tags EDS,MCAS
     python scripts/run_pipeline.py --file urls.txt --analyze
+    python scripts/run_pipeline.py --file urls.txt --provider ollama --model gpt-oss:20b
 """
 import sys
 import argparse
