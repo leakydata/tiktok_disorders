@@ -125,6 +125,13 @@ uv run python scripts/extract_symptoms.py --video-id 1 --min-confidence 0.6
 uv run python scripts/analyze.py --cluster-method kmeans --viz-method umap
 ```
 
+### Backfill database from existing transcripts
+```bash
+uv run python scripts/backfill_transcripts.py --dir data/transcripts
+# Optionally extract symptoms after backfill
+uv run python scripts/backfill_transcripts.py --dir data/transcripts --extract --provider ollama --model gpt-oss:20b
+```
+
 ## View Statistics
 
 ```bash
