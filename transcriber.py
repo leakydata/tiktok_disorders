@@ -16,6 +16,7 @@ try:
     import whisper as openai_whisper
 except ImportError:
     openai_whisper = None
+
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 import json
@@ -94,7 +95,7 @@ class AudioTranscriber:
             save_segments: Whether to save detailed segment information
             temperature: Sampling temperature (0 = deterministic, higher = more creative)
             language: Force a specific language (e.g., 'en'), or None for auto-detect
-            **kwargs: Additional arguments passed to whisper.transcribe()
+            **kwargs: Additional arguments passed to the backend transcribe()
 
         Returns:
             Dictionary containing transcript and metadata
@@ -264,8 +265,11 @@ class AudioTranscriber:
             try:
                 start_time = time.time()
 
+                if openai_whisper is None:
+                    raise ImportError("openai-whisper is not installed")
+
                 # Load model
-                model = whisper.load_model(model_size, device=self.device)
+                model = openai_whisper.load_model(model_size, device=self.device)
 
                 # Transcribe
                 result = model.transcribe(audio_path, fp16=self.device == 'cuda')
@@ -310,7 +314,7 @@ if __name__ == '__main__':
     print("=" * 60)
 
     # Check GPU
-    if torch.cuda.is_available():
+    if torch and torch.cuda.is_available():
         print(f"✓ CUDA is available: {torch.cuda.get_device_name(0)}")
         print(f"  GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f} GB")
     else:

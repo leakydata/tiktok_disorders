@@ -17,6 +17,8 @@ This guide will help you get started with the EDS/MCAS/POTS Research Pipeline.
 ```bash
 cd tiktok_disorders
 uv sync
+# Optional: OpenAI Whisper backend (requires Python < 3.10)
+# uv sync --extra openai-whisper
 ```
 
 ### 2. Install system dependencies

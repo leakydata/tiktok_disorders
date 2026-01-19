@@ -32,6 +32,9 @@ uv sync
 # Or with pip
 pip install -r requirements.txt
 
+# Optional: install OpenAI Whisper backend (requires Python < 3.10)
+# uv sync --extra openai-whisper
+
 # Set up environment variables
 cp .env.example .env
 # Edit .env with your database credentials and API keys
@@ -95,6 +98,13 @@ Configuration is managed through environment variables in `.env`:
 - `OLLAMA_MODEL` - Ollama model name (default: `gpt-oss:20b`)
 - `AUDIO_DIR` - Directory for storing audio files (default: ./data/audio)
 - `TRANSCRIPT_DIR` - Directory for storing transcripts (default: ./data/transcripts)
+- `TRANSCRIBER_BACKEND` - `faster-whisper` or `openai-whisper` (default: `faster-whisper`)
+- `WHISPER_COMPUTE_TYPE` - Faster-Whisper compute type (default: `auto`)
+
+To use the OpenAI Whisper backend, install the optional dependency and set:
+```
+TRANSCRIBER_BACKEND=openai-whisper
+```
 
 ## Output
 
