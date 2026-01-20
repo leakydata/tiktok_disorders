@@ -18,7 +18,11 @@ from config import (
     OLLAMA_MODEL,
     OLLAMA_URL,
 )
-from database import insert_symptom, get_transcript, get_video_by_id
+from database import (
+    insert_symptom, get_transcript, get_video_by_id,
+    insert_claimed_diagnosis, get_diagnoses_by_video,
+    calculate_symptom_concordance
+)
 
 
 # Comprehensive symptom categories for EDS, MCAS, and POTS
@@ -213,6 +217,148 @@ Return ONLY the JSON array, no additional text."""
                 'success': False,
                 'error': str(e)
             }
+
+    def extract_diagnoses(self, video_id: int) -> Dict[str, Any]:
+        """
+        Extract claimed diagnoses from a video's transcript.
+
+        Args:
+            video_id: Database ID of the video
+
+        Returns:
+            Dictionary with diagnosis extraction results
+        """
+        # Get transcript
+        transcript_data = get_transcript(video_id)
+        if not transcript_data:
+            raise ValueError(f"No transcript found for video {video_id}")
+
+        transcript_text = transcript_data['text']
+
+        if len(transcript_text.split()) < 10:
+            return {'video_id': video_id, 'diagnoses_found': 0, 'diagnoses_saved': 0}
+
+        print(f"Extracting diagnoses from video {video_id}...")
+
+        prompt = f"""Analyze this transcript and extract any medical conditions or diagnoses that the speaker claims to have.
+
+Look for mentions of:
+- EDS (Ehlers-Danlos Syndrome) - any type (hEDS, vEDS, classical, etc.)
+- MCAS (Mast Cell Activation Syndrome)
+- POTS (Postural Orthostatic Tachycardia Syndrome)
+- Fibromyalgia
+- CFS/ME (Chronic Fatigue Syndrome / Myalgic Encephalomyelitis)
+- Any other chronic illnesses mentioned
+
+For each claimed diagnosis, provide:
+1. **condition_code**: Abbreviation (EDS, MCAS, POTS, FIBROMYALGIA, CFS, or OTHER)
+2. **condition_name**: Full name as the speaker calls it
+3. **confidence**: 0.0-1.0 based on how clearly they claim to have it
+4. **is_self_diagnosed**: true if they mention self-diagnosis, false if doctor-diagnosed, null if unclear
+5. **diagnosis_date_mentioned**: Any date/year mentioned for when diagnosed (or null)
+6. **context**: The quote where they mention having this condition
+
+Return a JSON array:
+[
+  {{
+    "condition_code": "EDS",
+    "condition_name": "hypermobile Ehlers-Danlos Syndrome",
+    "confidence": 0.95,
+    "is_self_diagnosed": false,
+    "diagnosis_date_mentioned": "2020",
+    "context": "I was diagnosed with hEDS in 2020 by a geneticist"
+  }}
+]
+
+Return ONLY the JSON array. If no diagnoses are mentioned, return an empty array [].
+
+TRANSCRIPT:
+{transcript_text}"""
+
+        try:
+            response_text = self._call_model(prompt)
+
+            # Extract JSON
+            if '```json' in response_text:
+                response_text = response_text.split('```json')[1].split('```')[0].strip()
+            elif '```' in response_text:
+                response_text = response_text.split('```')[1].split('```')[0].strip()
+
+            diagnoses = json.loads(response_text)
+
+            # Save diagnoses
+            saved_count = 0
+            diagnosis_ids = []
+            for diag in diagnoses:
+                if diag.get('confidence', 0) >= 0.5:
+                    diag_id = insert_claimed_diagnosis(
+                        video_id=video_id,
+                        condition_code=diag.get('condition_code', 'OTHER'),
+                        condition_name=diag.get('condition_name', 'Unknown'),
+                        confidence=diag.get('confidence', 0.5),
+                        context=diag.get('context'),
+                        is_self_diagnosed=diag.get('is_self_diagnosed'),
+                        diagnosis_date_mentioned=diag.get('diagnosis_date_mentioned'),
+                        extractor_model=self.model,
+                        extractor_provider=self.provider
+                    )
+                    diagnosis_ids.append(diag_id)
+                    saved_count += 1
+
+            print(f"✓ Extracted {len(diagnoses)} diagnoses, saved {saved_count}")
+
+            return {
+                'video_id': video_id,
+                'diagnoses_found': len(diagnoses),
+                'diagnoses_saved': saved_count,
+                'diagnosis_ids': diagnosis_ids,
+                'success': True
+            }
+
+        except Exception as e:
+            print(f"✗ Error extracting diagnoses: {e}")
+            return {
+                'video_id': video_id,
+                'success': False,
+                'error': str(e)
+            }
+
+    def extract_all(self, video_id: int, min_confidence: Optional[float] = None) -> Dict[str, Any]:
+        """
+        Extract symptoms, diagnoses, and calculate concordance for a video.
+
+        Args:
+            video_id: Database ID of the video
+            min_confidence: Minimum confidence for symptoms
+
+        Returns:
+            Combined results with concordance analysis
+        """
+        # Extract symptoms
+        symptom_result = self.extract_symptoms(video_id, min_confidence)
+
+        # Extract diagnoses
+        diagnosis_result = self.extract_diagnoses(video_id)
+
+        # Calculate concordance for each diagnosis
+        concordance_results = []
+        if diagnosis_result.get('success') and diagnosis_result.get('diagnosis_ids'):
+            for diag_id in diagnosis_result['diagnosis_ids']:
+                try:
+                    concordance = calculate_symptom_concordance(video_id, diag_id, self.model)
+                    concordance_results.append(concordance)
+                    print(f"  Concordance for diagnosis {diag_id}: {concordance['concordance_score']:.2f} "
+                          f"(core: {concordance['core_symptom_score']:.2f})")
+                except Exception as e:
+                    print(f"  Could not calculate concordance for {diag_id}: {e}")
+
+        return {
+            'video_id': video_id,
+            'symptoms': symptom_result,
+            'diagnoses': diagnosis_result,
+            'concordance': concordance_results,
+            'success': symptom_result.get('success', False) and diagnosis_result.get('success', False)
+        }
 
     def _call_model(self, prompt: str) -> str:
         if self.provider == "anthropic":

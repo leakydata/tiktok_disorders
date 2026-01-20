@@ -1,12 +1,14 @@
 """
 Database module for the TikTok Disorders Research Pipeline.
-Handles PostgreSQL connections and CRUD operations for videos, transcripts, and symptoms.
+Handles PostgreSQL connections and CRUD operations for videos, transcripts, symptoms, and diagnoses.
 
 Research-grade schema with:
 - Data provenance tracking for reproducibility
 - Enhanced symptom tracking with severity and temporal patterns
 - Video metadata enrichment with engagement metrics
 - Symptom co-occurrence tracking
+- Claimed diagnosis tracking with concordance analysis
+- Expected symptoms per condition for validation
 """
 import psycopg2
 from psycopg2.extras import RealDictCursor
@@ -18,16 +20,87 @@ import json
 from config import DATABASE_URL
 
 
+# =============================================================================
+# Expected symptoms for each condition (based on medical literature)
+# Used for concordance analysis
+# =============================================================================
+
+CONDITION_EXPECTED_SYMPTOMS = {
+    'EDS': {
+        'name': 'Ehlers-Danlos Syndrome',
+        'core_symptoms': [
+            'joint hypermobility', 'joint instability', 'dislocations', 'subluxations',
+            'chronic pain', 'easy bruising', 'skin hyperextensibility', 'poor wound healing',
+            'soft velvety skin', 'joint pain', 'fatigue'
+        ],
+        'common_symptoms': [
+            'chronic fatigue', 'headaches', 'TMJ dysfunction', 'scoliosis', 'flat feet',
+            'muscle weakness', 'clicking joints', 'sprains', 'hernias', 'prolapse',
+            'digestive issues', 'POTS symptoms', 'anxiety'
+        ],
+        'categories': ['musculoskeletal', 'dermatological', 'fatigue']
+    },
+    'MCAS': {
+        'name': 'Mast Cell Activation Syndrome',
+        'core_symptoms': [
+            'flushing', 'hives', 'itching', 'anaphylaxis', 'swelling',
+            'abdominal pain', 'diarrhea', 'nausea', 'food reactions',
+            'chemical sensitivity', 'medication sensitivity'
+        ],
+        'common_symptoms': [
+            'brain fog', 'fatigue', 'headaches', 'anxiety', 'rapid heart rate',
+            'low blood pressure', 'fainting', 'nasal congestion', 'wheezing',
+            'skin rashes', 'bone pain', 'bladder pain', 'interstitial cystitis'
+        ],
+        'categories': ['allergic', 'gastrointestinal', 'dermatological', 'neurological']
+    },
+    'POTS': {
+        'name': 'Postural Orthostatic Tachycardia Syndrome',
+        'core_symptoms': [
+            'rapid heart rate on standing', 'dizziness', 'lightheadedness',
+            'fainting', 'near-fainting', 'palpitations', 'exercise intolerance',
+            'tachycardia', 'orthostatic intolerance'
+        ],
+        'common_symptoms': [
+            'fatigue', 'brain fog', 'headaches', 'nausea', 'tremors',
+            'shortness of breath', 'chest pain', 'cold extremities',
+            'blood pooling', 'blurred vision', 'weakness', 'sweating',
+            'anxiety', 'sleep problems', 'GI issues'
+        ],
+        'categories': ['cardiovascular', 'autonomic', 'neurological', 'fatigue']
+    },
+    'FIBROMYALGIA': {
+        'name': 'Fibromyalgia',
+        'core_symptoms': [
+            'widespread pain', 'tender points', 'chronic pain', 'muscle pain',
+            'fatigue', 'sleep problems', 'cognitive difficulties', 'brain fog'
+        ],
+        'common_symptoms': [
+            'headaches', 'IBS', 'anxiety', 'depression', 'TMJ pain',
+            'numbness', 'tingling', 'sensitivity to light', 'sensitivity to sound',
+            'morning stiffness', 'restless legs'
+        ],
+        'categories': ['musculoskeletal', 'neurological', 'fatigue']
+    },
+    'CFS': {
+        'name': 'Chronic Fatigue Syndrome / ME',
+        'core_symptoms': [
+            'severe fatigue', 'post-exertional malaise', 'unrefreshing sleep',
+            'cognitive impairment', 'brain fog', 'orthostatic intolerance'
+        ],
+        'common_symptoms': [
+            'muscle pain', 'joint pain', 'headaches', 'sore throat',
+            'tender lymph nodes', 'sensitivity to light', 'sensitivity to sound',
+            'dizziness', 'nausea', 'palpitations'
+        ],
+        'categories': ['fatigue', 'neurological', 'autonomic']
+    }
+}
+
+
 @contextmanager
 def get_connection():
-    """
-    Get a database connection as a context manager.
-
-    Usage:
-        with get_connection() as conn:
-            cur = conn.cursor()
-            cur.execute("SELECT * FROM videos")
-    """
+    """Get a database connection as a context manager."""
     conn = psycopg2.connect(DATABASE_URL)
     try:
         yield conn
@@ -48,7 +121,7 @@ def init_db():
         # Core Tables
         # =============================================================================
 
-        # Videos table - enriched with engagement metrics and creator info
+        # Videos table
         cur.execute("""
             CREATE TABLE IF NOT EXISTS videos (
                 id SERIAL PRIMARY KEY,
@@ -67,7 +140,7 @@ def init_db():
                 audio_path TEXT,
                 audio_size_bytes BIGINT,
 
-                -- Engagement metrics (snapshot at collection time)
+                -- Engagement metrics
                 view_count BIGINT,
                 like_count BIGINT,
                 comment_count BIGINT,
@@ -88,7 +161,7 @@ def init_db():
             )
         """)
 
-        # Transcripts table - with model provenance
+        # Transcripts table
         cur.execute("""
             CREATE TABLE IF NOT EXISTS transcripts (
                 id SERIAL PRIMARY KEY,
@@ -96,30 +169,22 @@ def init_db():
                 text TEXT NOT NULL,
                 language TEXT,
                 language_confidence REAL,
-
-                -- Model provenance
                 model_used TEXT,
                 model_backend TEXT,
                 model_compute_type TEXT,
                 transcription_device TEXT,
-
-                -- Quality metrics
                 word_count INTEGER,
                 audio_duration_seconds REAL,
                 words_per_minute REAL,
-
                 segments JSONB,
-
-                -- Timestamps
                 transcribed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 processing_time_seconds REAL,
-
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE(video_id)
             )
         """)
 
-        # Symptoms table - enhanced with severity and temporal patterns
+        # Symptoms table
         cur.execute("""
             CREATE TABLE IF NOT EXISTS symptoms (
                 id SERIAL PRIMARY KEY,
@@ -128,21 +193,79 @@ def init_db():
                 symptom TEXT NOT NULL,
                 confidence REAL NOT NULL,
                 context TEXT,
-
-                -- Enhanced symptom tracking
                 severity TEXT CHECK (severity IN ('mild', 'moderate', 'severe', 'unspecified')),
                 temporal_pattern TEXT CHECK (temporal_pattern IN ('acute', 'chronic', 'intermittent', 'progressive', 'unspecified')),
                 body_location TEXT,
                 triggers TEXT[],
-
-                -- Whether speaker is describing personal experience vs general info
                 is_personal_experience BOOLEAN DEFAULT TRUE,
-
-                -- Model provenance
                 extractor_model TEXT,
                 extractor_provider TEXT,
-
                 extracted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        # =============================================================================
+        # Diagnosis Tracking Tables (NEW)
+        # =============================================================================
+
+        # Claimed diagnoses - what conditions the speaker claims to have
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS claimed_diagnoses (
+                id SERIAL PRIMARY KEY,
+                video_id INTEGER REFERENCES videos(id) ON DELETE CASCADE,
+                condition_code TEXT NOT NULL,
+                condition_name TEXT NOT NULL,
+                confidence REAL NOT NULL,
+                context TEXT,
+                is_self_diagnosed BOOLEAN,
+                diagnosis_date_mentioned TEXT,
+                extractor_model TEXT,
+                extractor_provider TEXT,
+                extracted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        # Expected symptoms reference table - symptoms expected for each condition
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS expected_symptoms (
+                id SERIAL PRIMARY KEY,
+                condition_code TEXT NOT NULL,
+                symptom TEXT NOT NULL,
+                is_core_symptom BOOLEAN DEFAULT FALSE,
+                category TEXT,
+                source TEXT DEFAULT 'medical_literature',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(condition_code, symptom)
+            )
+        """)
+
+        # Symptom concordance - how well reported symptoms match expected symptoms
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS symptom_concordance (
+                id SERIAL PRIMARY KEY,
+                video_id INTEGER REFERENCES videos(id) ON DELETE CASCADE,
+                diagnosis_id INTEGER REFERENCES claimed_diagnoses(id) ON DELETE CASCADE,
+
+                -- Concordance metrics
+                total_symptoms_reported INTEGER DEFAULT 0,
+                expected_symptoms_matched INTEGER DEFAULT 0,
+                core_symptoms_matched INTEGER DEFAULT 0,
+                unexpected_symptoms_count INTEGER DEFAULT 0,
+
+                -- Calculated scores
+                concordance_score REAL,
+                core_symptom_score REAL,
+
+                -- Lists for analysis
+                matched_symptoms TEXT[],
+                unmatched_expected TEXT[],
+                unexpected_symptoms TEXT[],
+
+                -- Analysis metadata
+                analyzed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                analyzer_model TEXT,
+
+                UNIQUE(video_id, diagnosis_id)
             )
         """)
 
@@ -150,7 +273,7 @@ def init_db():
         # Research Enhancement Tables
         # =============================================================================
 
-        # Symptom co-occurrence tracking
+        # Symptom co-occurrence
         cur.execute("""
             CREATE TABLE IF NOT EXISTS symptom_cooccurrence (
                 id SERIAL PRIMARY KEY,
@@ -164,7 +287,7 @@ def init_db():
             )
         """)
 
-        # Engagement metrics history (for tracking changes over time)
+        # Engagement snapshots
         cur.execute("""
             CREATE TABLE IF NOT EXISTS engagement_snapshots (
                 id SERIAL PRIMARY KEY,
@@ -177,7 +300,7 @@ def init_db():
             )
         """)
 
-        # Processing runs - track each pipeline execution
+        # Processing runs
         cur.execute("""
             CREATE TABLE IF NOT EXISTS processing_runs (
                 id SERIAL PRIMARY KEY,
@@ -187,23 +310,26 @@ def init_db():
                 videos_processed INTEGER DEFAULT 0,
                 transcripts_created INTEGER DEFAULT 0,
                 symptoms_extracted INTEGER DEFAULT 0,
+                diagnoses_extracted INTEGER DEFAULT 0,
+                concordance_analyzed INTEGER DEFAULT 0,
                 errors JSONB,
                 config_snapshot JSONB,
                 notes TEXT
             )
         """)
 
-        # Research annotations - for manual tagging/review
+        # Annotations
         cur.execute("""
             CREATE TABLE IF NOT EXISTS annotations (
                 id SERIAL PRIMARY KEY,
                 video_id INTEGER REFERENCES videos(id) ON DELETE CASCADE,
                 symptom_id INTEGER REFERENCES symptoms(id) ON DELETE CASCADE,
+                diagnosis_id INTEGER REFERENCES claimed_diagnoses(id) ON DELETE CASCADE,
                 annotation_type TEXT NOT NULL,
                 annotation_value TEXT,
                 annotator TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                CHECK (video_id IS NOT NULL OR symptom_id IS NOT NULL)
+                CHECK (video_id IS NOT NULL OR symptom_id IS NOT NULL OR diagnosis_id IS NOT NULL)
             )
         """)
 
@@ -214,26 +340,43 @@ def init_db():
         cur.execute("CREATE INDEX IF NOT EXISTS idx_videos_url ON videos(url)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_videos_platform ON videos(platform)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_videos_author ON videos(author)")
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_videos_upload_date ON videos(upload_date)")
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_videos_collected_at ON videos(collected_at)")
-
         cur.execute("CREATE INDEX IF NOT EXISTS idx_transcripts_video_id ON transcripts(video_id)")
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_transcripts_language ON transcripts(language)")
-
         cur.execute("CREATE INDEX IF NOT EXISTS idx_symptoms_video_id ON symptoms(video_id)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_symptoms_category ON symptoms(category)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_symptoms_confidence ON symptoms(confidence)")
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_symptoms_severity ON symptoms(severity)")
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_symptoms_temporal ON symptoms(temporal_pattern)")
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_symptoms_personal ON symptoms(is_personal_experience)")
-
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_cooccur_video ON symptom_cooccurrence(video_id)")
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_engagement_video ON engagement_snapshots(video_id)")
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_annotations_video ON annotations(video_id)")
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_annotations_symptom ON annotations(symptom_id)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_diagnoses_video_id ON claimed_diagnoses(video_id)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_diagnoses_condition ON claimed_diagnoses(condition_code)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_expected_condition ON expected_symptoms(condition_code)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_concordance_video ON symptom_concordance(video_id)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_concordance_diagnosis ON symptom_concordance(diagnosis_id)")
 
         conn.commit()
         print("Database schema initialized successfully")
+
+        # Populate expected symptoms reference table
+        _populate_expected_symptoms(cur)
+        conn.commit()
+        print("Expected symptoms reference data populated")
+
+
+def _populate_expected_symptoms(cur):
+    """Populate the expected_symptoms table with medical reference data."""
+    for condition_code, data in CONDITION_EXPECTED_SYMPTOMS.items():
+        # Insert core symptoms
+        for symptom in data['core_symptoms']:
+            cur.execute("""
+                INSERT INTO expected_symptoms (condition_code, symptom, is_core_symptom, category)
+                VALUES (%s, %s, TRUE, %s)
+                ON CONFLICT (condition_code, symptom) DO NOTHING
+            """, (condition_code, symptom.lower(), data['categories'][0] if data['categories'] else None))
+
+        # Insert common symptoms
+        for symptom in data['common_symptoms']:
+            cur.execute("""
+                INSERT INTO expected_symptoms (condition_code, symptom, is_core_symptom, category)
+                VALUES (%s, %s, FALSE, NULL)
+                ON CONFLICT (condition_code, symptom) DO NOTHING
+            """, (condition_code, symptom.lower()))
 
 
 # =============================================================================
@@ -241,18 +384,7 @@ def init_db():
 # =============================================================================
 
 def insert_video(url: str, platform: str, video_id: str, metadata: Dict[str, Any]) -> int:
-    """
-    Insert a video record into the database.
-
-    Args:
-        url: Video URL
-        platform: Platform name (youtube, tiktok, etc.)
-        video_id: Platform-specific video ID
-        metadata: Dictionary containing video metadata
-
-    Returns:
-        Database ID of the inserted video
-    """
+    """Insert a video record into the database."""
     with get_connection() as conn:
         cur = conn.cursor()
         cur.execute("""
@@ -266,47 +398,23 @@ def insert_video(url: str, platform: str, video_id: str, metadata: Dict[str, Any
             ON CONFLICT (url) DO UPDATE SET
                 title = COALESCE(EXCLUDED.title, videos.title),
                 author = COALESCE(EXCLUDED.author, videos.author),
-                author_id = COALESCE(EXCLUDED.author_id, videos.author_id),
-                author_follower_count = COALESCE(EXCLUDED.author_follower_count, videos.author_follower_count),
                 duration = COALESCE(EXCLUDED.duration, videos.duration),
-                upload_date = COALESCE(EXCLUDED.upload_date, videos.upload_date),
-                tags = COALESCE(EXCLUDED.tags, videos.tags),
-                hashtags = COALESCE(EXCLUDED.hashtags, videos.hashtags),
-                description = COALESCE(EXCLUDED.description, videos.description),
                 audio_path = COALESCE(EXCLUDED.audio_path, videos.audio_path),
-                audio_size_bytes = COALESCE(EXCLUDED.audio_size_bytes, videos.audio_size_bytes),
-                view_count = COALESCE(EXCLUDED.view_count, videos.view_count),
-                like_count = COALESCE(EXCLUDED.like_count, videos.like_count),
-                comment_count = COALESCE(EXCLUDED.comment_count, videos.comment_count),
-                share_count = COALESCE(EXCLUDED.share_count, videos.share_count),
                 updated_at = CURRENT_TIMESTAMP
             RETURNING id
         """, (
-            url,
-            platform,
-            video_id,
-            metadata.get('title'),
-            metadata.get('author'),
-            metadata.get('author_id'),
-            metadata.get('author_follower_count'),
-            metadata.get('duration'),
-            metadata.get('upload_date'),
-            metadata.get('tags', []),
-            metadata.get('hashtags', []),
-            metadata.get('description'),
-            metadata.get('audio_path'),
-            metadata.get('audio_size_bytes'),
-            metadata.get('view_count'),
-            metadata.get('like_count'),
-            metadata.get('comment_count'),
-            metadata.get('share_count'),
-            metadata.get('collection_method', 'yt-dlp'),
-            metadata.get('collection_version'),
-            metadata.get('is_verified_creator'),
-            metadata.get('research_notes')
+            url, platform, video_id,
+            metadata.get('title'), metadata.get('author'), metadata.get('author_id'),
+            metadata.get('author_follower_count'), metadata.get('duration'),
+            metadata.get('upload_date'), metadata.get('tags', []),
+            metadata.get('hashtags', []), metadata.get('description'),
+            metadata.get('audio_path'), metadata.get('audio_size_bytes'),
+            metadata.get('view_count'), metadata.get('like_count'),
+            metadata.get('comment_count'), metadata.get('share_count'),
+            metadata.get('collection_method', 'yt-dlp'), metadata.get('collection_version'),
+            metadata.get('is_verified_creator'), metadata.get('research_notes')
         ))
-        result = cur.fetchone()
-        return result[0]
+        return cur.fetchone()[0]
 
 
 def get_video_by_url(url: str) -> Optional[Dict[str, Any]]:
@@ -348,20 +456,6 @@ def get_all_videos_with_transcripts() -> List[Dict[str, Any]]:
         return [dict(row) for row in cur.fetchall()]
 
 
-def save_engagement_snapshot(video_id: int) -> int:
-    """Save current engagement metrics as a historical snapshot."""
-    with get_connection() as conn:
-        cur = conn.cursor()
-        cur.execute("""
-            INSERT INTO engagement_snapshots (video_id, view_count, like_count, comment_count, share_count)
-            SELECT id, view_count, like_count, comment_count, share_count
-            FROM videos WHERE id = %s
-            RETURNING id
-        """, (video_id,))
-        result = cur.fetchone()
-        return result[0] if result else None
-
-
 # =============================================================================
 # Transcript Operations
 # =============================================================================
@@ -369,12 +463,7 @@ def save_engagement_snapshot(video_id: int) -> int:
 def insert_transcript(video_id: int, text: str, language: Optional[str] = None,
                      model_used: Optional[str] = None, segments: Optional[List] = None,
                      **kwargs) -> int:
-    """
-    Insert a transcript record with full provenance tracking.
-
-    Additional kwargs: model_backend, model_compute_type, transcription_device,
-                      language_confidence, audio_duration_seconds, processing_time_seconds
-    """
+    """Insert a transcript record with full provenance tracking."""
     word_count = len(text.split()) if text else 0
     audio_duration = kwargs.get('audio_duration_seconds')
     wpm = (word_count / (audio_duration / 60)) if audio_duration and audio_duration > 0 else None
@@ -392,35 +481,17 @@ def insert_transcript(video_id: int, text: str, language: Optional[str] = None,
             ON CONFLICT (video_id) DO UPDATE SET
                 text = EXCLUDED.text,
                 language = EXCLUDED.language,
-                language_confidence = EXCLUDED.language_confidence,
                 model_used = EXCLUDED.model_used,
-                model_backend = EXCLUDED.model_backend,
-                model_compute_type = EXCLUDED.model_compute_type,
-                transcription_device = EXCLUDED.transcription_device,
                 word_count = EXCLUDED.word_count,
-                audio_duration_seconds = EXCLUDED.audio_duration_seconds,
-                words_per_minute = EXCLUDED.words_per_minute,
-                segments = EXCLUDED.segments,
-                processing_time_seconds = EXCLUDED.processing_time_seconds,
                 transcribed_at = CURRENT_TIMESTAMP
             RETURNING id
         """, (
-            video_id,
-            text,
-            language,
-            kwargs.get('language_confidence'),
-            model_used,
-            kwargs.get('model_backend'),
-            kwargs.get('model_compute_type'),
-            kwargs.get('transcription_device'),
-            word_count,
-            audio_duration,
-            wpm,
-            json.dumps(segments) if segments else None,
-            kwargs.get('processing_time_seconds')
+            video_id, text, language, kwargs.get('language_confidence'),
+            model_used, kwargs.get('model_backend'), kwargs.get('model_compute_type'),
+            kwargs.get('transcription_device'), word_count, audio_duration, wpm,
+            json.dumps(segments) if segments else None, kwargs.get('processing_time_seconds')
         ))
-        result = cur.fetchone()
-        return result[0]
+        return cur.fetchone()[0]
 
 
 def get_transcript(video_id: int) -> Optional[Dict[str, Any]]:
@@ -439,12 +510,7 @@ def get_transcript(video_id: int) -> Optional[Dict[str, Any]]:
 def insert_symptom(video_id: int, category: str, symptom: str,
                   confidence: float, context: Optional[str] = None,
                   **kwargs) -> int:
-    """
-    Insert a symptom record with enhanced tracking.
-
-    Additional kwargs: severity, temporal_pattern, body_location, triggers,
-                      is_personal_experience, extractor_model, extractor_provider
-    """
+    """Insert a symptom record with enhanced tracking."""
     with get_connection() as conn:
         cur = conn.cursor()
         cur.execute("""
@@ -456,40 +522,307 @@ def insert_symptom(video_id: int, category: str, symptom: str,
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id
         """, (
-            video_id,
-            category,
-            symptom,
-            confidence,
-            context,
+            video_id, category, symptom, confidence, context,
             kwargs.get('severity', 'unspecified'),
             kwargs.get('temporal_pattern', 'unspecified'),
-            kwargs.get('body_location'),
-            kwargs.get('triggers', []),
+            kwargs.get('body_location'), kwargs.get('triggers', []),
             kwargs.get('is_personal_experience', True),
-            kwargs.get('extractor_model'),
-            kwargs.get('extractor_provider')
+            kwargs.get('extractor_model'), kwargs.get('extractor_provider')
         ))
-        result = cur.fetchone()
-        return result[0]
+        return cur.fetchone()[0]
 
 
 def get_symptoms_by_video(video_id: int) -> List[Dict[str, Any]]:
     """Get all symptoms for a video."""
     with get_connection() as conn:
         cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("SELECT * FROM symptoms WHERE video_id = %s ORDER BY confidence DESC", (video_id,))
+        return [dict(row) for row in cur.fetchall()]
+
+
+# =============================================================================
+# Diagnosis Operations (NEW)
+# =============================================================================
+
+def insert_claimed_diagnosis(video_id: int, condition_code: str, condition_name: str,
+                            confidence: float, context: Optional[str] = None,
+                            **kwargs) -> int:
+    """Insert a claimed diagnosis record."""
+    with get_connection() as conn:
+        cur = conn.cursor()
         cur.execute("""
-            SELECT * FROM symptoms
+            INSERT INTO claimed_diagnoses (
+                video_id, condition_code, condition_name, confidence, context,
+                is_self_diagnosed, diagnosis_date_mentioned,
+                extractor_model, extractor_provider
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id
+        """, (
+            video_id, condition_code.upper(), condition_name, confidence, context,
+            kwargs.get('is_self_diagnosed'),
+            kwargs.get('diagnosis_date_mentioned'),
+            kwargs.get('extractor_model'),
+            kwargs.get('extractor_provider')
+        ))
+        return cur.fetchone()[0]
+
+
+def get_diagnoses_by_video(video_id: int) -> List[Dict[str, Any]]:
+    """Get all claimed diagnoses for a video."""
+    with get_connection() as conn:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("""
+            SELECT * FROM claimed_diagnoses
             WHERE video_id = %s
             ORDER BY confidence DESC
         """, (video_id,))
         return [dict(row) for row in cur.fetchall()]
 
 
+def get_expected_symptoms(condition_code: str) -> Dict[str, List[str]]:
+    """Get expected symptoms for a condition."""
+    with get_connection() as conn:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("""
+            SELECT symptom, is_core_symptom
+            FROM expected_symptoms
+            WHERE condition_code = %s
+        """, (condition_code.upper(),))
+        results = cur.fetchall()
+
+        core = [r['symptom'] for r in results if r['is_core_symptom']]
+        common = [r['symptom'] for r in results if not r['is_core_symptom']]
+
+        return {'core': core, 'common': common, 'all': core + common}
+
+
+# =============================================================================
+# Concordance Analysis (NEW)
+# =============================================================================
+
+def calculate_symptom_concordance(video_id: int, diagnosis_id: int,
+                                  analyzer_model: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Calculate how well reported symptoms match expected symptoms for a diagnosis.
+
+    Returns concordance metrics and saves to database.
+    """
+    with get_connection() as conn:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+
+        # Get the diagnosis
+        cur.execute("SELECT * FROM claimed_diagnoses WHERE id = %s", (diagnosis_id,))
+        diagnosis = cur.fetchone()
+        if not diagnosis:
+            raise ValueError(f"Diagnosis {diagnosis_id} not found")
+
+        condition_code = diagnosis['condition_code']
+
+        # Get reported symptoms for this video
+        cur.execute("""
+            SELECT LOWER(symptom) as symptom, category, confidence
+            FROM symptoms
+            WHERE video_id = %s AND is_personal_experience = TRUE
+        """, (video_id,))
+        reported_symptoms = [r['symptom'] for r in cur.fetchall()]
+
+        # Get expected symptoms for this condition
+        expected = get_expected_symptoms(condition_code)
+        all_expected = set(expected['all'])
+        core_expected = set(expected['core'])
+
+        # Calculate matches
+        reported_set = set(reported_symptoms)
+
+        # Fuzzy matching - check if reported symptom contains or is contained by expected
+        matched = []
+        for reported in reported_set:
+            for exp in all_expected:
+                if exp in reported or reported in exp:
+                    matched.append(reported)
+                    break
+
+        matched_set = set(matched)
+        core_matched = []
+        for m in matched_set:
+            for core in core_expected:
+                if core in m or m in core:
+                    core_matched.append(m)
+                    break
+
+        # Unexpected symptoms (reported but not in expected list)
+        unexpected = [s for s in reported_set if s not in matched_set]
+
+        # Calculate scores
+        total_reported = len(reported_set)
+        matched_count = len(matched_set)
+        core_matched_count = len(set(core_matched))
+
+        concordance_score = matched_count / total_reported if total_reported > 0 else 0
+        core_score = core_matched_count / len(core_expected) if core_expected else 0
+
+        # Unmatched expected (expected but not reported)
+        unmatched_expected = list(all_expected - matched_set)
+
+        # Save to database
+        cur.execute("""
+            INSERT INTO symptom_concordance (
+                video_id, diagnosis_id,
+                total_symptoms_reported, expected_symptoms_matched, core_symptoms_matched,
+                unexpected_symptoms_count, concordance_score, core_symptom_score,
+                matched_symptoms, unmatched_expected, unexpected_symptoms, analyzer_model
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (video_id, diagnosis_id) DO UPDATE SET
+                total_symptoms_reported = EXCLUDED.total_symptoms_reported,
+                expected_symptoms_matched = EXCLUDED.expected_symptoms_matched,
+                core_symptoms_matched = EXCLUDED.core_symptoms_matched,
+                unexpected_symptoms_count = EXCLUDED.unexpected_symptoms_count,
+                concordance_score = EXCLUDED.concordance_score,
+                core_symptom_score = EXCLUDED.core_symptom_score,
+                matched_symptoms = EXCLUDED.matched_symptoms,
+                unmatched_expected = EXCLUDED.unmatched_expected,
+                unexpected_symptoms = EXCLUDED.unexpected_symptoms,
+                analyzed_at = CURRENT_TIMESTAMP
+            RETURNING id
+        """, (
+            video_id, diagnosis_id,
+            total_reported, matched_count, core_matched_count,
+            len(unexpected), concordance_score, core_score,
+            list(matched_set), unmatched_expected[:20], unexpected[:20],
+            analyzer_model
+        ))
+
+        conn.commit()
+
+        return {
+            'video_id': video_id,
+            'diagnosis_id': diagnosis_id,
+            'condition': condition_code,
+            'total_symptoms_reported': total_reported,
+            'expected_matched': matched_count,
+            'core_matched': core_matched_count,
+            'unexpected_count': len(unexpected),
+            'concordance_score': round(concordance_score, 3),
+            'core_symptom_score': round(core_score, 3),
+            'matched_symptoms': list(matched_set),
+            'missing_core_symptoms': [s for s in core_expected if s not in str(matched_set)],
+            'unexpected_symptoms': unexpected[:10]
+        }
+
+
+def get_concordance_summary(video_id: int) -> List[Dict[str, Any]]:
+    """Get concordance analysis summary for all diagnoses in a video."""
+    with get_connection() as conn:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("""
+            SELECT
+                sc.*,
+                cd.condition_code,
+                cd.condition_name,
+                cd.is_self_diagnosed
+            FROM symptom_concordance sc
+            JOIN claimed_diagnoses cd ON sc.diagnosis_id = cd.id
+            WHERE sc.video_id = %s
+            ORDER BY sc.concordance_score DESC
+        """, (video_id,))
+        return [dict(row) for row in cur.fetchall()]
+
+
+# =============================================================================
+# Statistics
+# =============================================================================
+
+def get_symptom_statistics() -> Dict[str, Any]:
+    """Get comprehensive statistics about extracted symptoms and diagnoses."""
+    with get_connection() as conn:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+
+        cur.execute("SELECT COUNT(*) as count FROM videos")
+        total_videos = cur.fetchone()['count']
+
+        cur.execute("SELECT COUNT(*) as count FROM transcripts")
+        total_transcripts = cur.fetchone()['count']
+
+        cur.execute("SELECT COUNT(*) as count FROM symptoms")
+        total_symptoms = cur.fetchone()['count']
+
+        cur.execute("SELECT COUNT(*) as count FROM claimed_diagnoses")
+        total_diagnoses = cur.fetchone()['count']
+
+        # Diagnoses by condition
+        cur.execute("""
+            SELECT condition_code, COUNT(*) as count
+            FROM claimed_diagnoses
+            GROUP BY condition_code
+            ORDER BY count DESC
+        """)
+        by_condition = [dict(row) for row in cur.fetchall()]
+
+        # Average concordance by condition
+        cur.execute("""
+            SELECT
+                cd.condition_code,
+                AVG(sc.concordance_score) as avg_concordance,
+                AVG(sc.core_symptom_score) as avg_core_score,
+                COUNT(*) as sample_size
+            FROM symptom_concordance sc
+            JOIN claimed_diagnoses cd ON sc.diagnosis_id = cd.id
+            GROUP BY cd.condition_code
+            ORDER BY avg_concordance DESC
+        """)
+        concordance_by_condition = [dict(row) for row in cur.fetchall()]
+
+        # Symptoms by category
+        cur.execute("""
+            SELECT category, COUNT(*) as count, AVG(confidence) as avg_confidence
+            FROM symptoms
+            GROUP BY category
+            ORDER BY count DESC
+        """)
+        by_category = [dict(row) for row in cur.fetchall()]
+
+        return {
+            'total_videos': total_videos,
+            'total_transcripts': total_transcripts,
+            'total_symptoms': total_symptoms,
+            'total_diagnoses': total_diagnoses,
+            'diagnoses_by_condition': by_condition,
+            'concordance_by_condition': concordance_by_condition,
+            'symptoms_by_category': by_category
+        }
+
+
+def get_cooccurrence_matrix(min_occurrences: int = 2) -> List[Dict[str, Any]]:
+    """Get symptom co-occurrence data for network analysis."""
+    with get_connection() as conn:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("""
+            SELECT
+                s1.symptom as symptom_a,
+                s1.category as category_a,
+                s2.symptom as symptom_b,
+                s2.category as category_b,
+                COUNT(*) as cooccurrence_count
+            FROM symptom_cooccurrence sc
+            JOIN symptoms s1 ON sc.symptom_a_id = s1.id
+            JOIN symptoms s2 ON sc.symptom_b_id = s2.id
+            GROUP BY s1.symptom, s1.category, s2.symptom, s2.category
+            HAVING COUNT(*) >= %s
+            ORDER BY cooccurrence_count DESC
+        """, (min_occurrences,))
+        return [dict(row) for row in cur.fetchall()]
+
+
+# =============================================================================
+# Utility functions
+# =============================================================================
+
 def insert_symptom_cooccurrence(symptom_a_id: int, symptom_b_id: int, video_id: int,
                                 temporal_proximity_seconds: Optional[float] = None,
                                 mentioned_together: bool = False) -> int:
-    """Record that two symptoms co-occurred in the same video."""
-    # Ensure consistent ordering (smaller ID first)
+    """Record symptom co-occurrence."""
     if symptom_a_id > symptom_b_id:
         symptom_a_id, symptom_b_id = symptom_b_id, symptom_a_id
 
@@ -500,17 +833,11 @@ def insert_symptom_cooccurrence(symptom_a_id: int, symptom_b_id: int, video_id: 
                                              temporal_proximity_seconds, mentioned_together)
             VALUES (%s, %s, %s, %s, %s)
             ON CONFLICT (symptom_a_id, symptom_b_id) DO UPDATE SET
-                temporal_proximity_seconds = EXCLUDED.temporal_proximity_seconds,
                 mentioned_together = EXCLUDED.mentioned_together
             RETURNING id
         """, (symptom_a_id, symptom_b_id, video_id, temporal_proximity_seconds, mentioned_together))
-        result = cur.fetchone()
-        return result[0]
+        return cur.fetchone()[0]
 
-
-# =============================================================================
-# Processing Run Tracking
-# =============================================================================
 
 def start_processing_run(run_type: str, config_snapshot: Optional[Dict] = None,
                         notes: Optional[str] = None) -> int:
@@ -525,9 +852,7 @@ def start_processing_run(run_type: str, config_snapshot: Optional[Dict] = None,
         return cur.fetchone()[0]
 
 
-def complete_processing_run(run_id: int, videos_processed: int = 0,
-                           transcripts_created: int = 0, symptoms_extracted: int = 0,
-                           errors: Optional[List[Dict]] = None):
+def complete_processing_run(run_id: int, **kwargs):
     """Mark a processing run as complete with statistics."""
     with get_connection() as conn:
         cur = conn.cursor()
@@ -537,136 +862,47 @@ def complete_processing_run(run_id: int, videos_processed: int = 0,
                 videos_processed = %s,
                 transcripts_created = %s,
                 symptoms_extracted = %s,
+                diagnoses_extracted = %s,
+                concordance_analyzed = %s,
                 errors = %s
             WHERE id = %s
-        """, (videos_processed, transcripts_created, symptoms_extracted,
-              json.dumps(errors) if errors else None, run_id))
+        """, (
+            kwargs.get('videos_processed', 0),
+            kwargs.get('transcripts_created', 0),
+            kwargs.get('symptoms_extracted', 0),
+            kwargs.get('diagnoses_extracted', 0),
+            kwargs.get('concordance_analyzed', 0),
+            json.dumps(kwargs.get('errors')) if kwargs.get('errors') else None,
+            run_id
+        ))
 
-
-# =============================================================================
-# Annotations
-# =============================================================================
 
 def add_annotation(annotation_type: str, annotation_value: str,
                   video_id: Optional[int] = None, symptom_id: Optional[int] = None,
-                  annotator: Optional[str] = None) -> int:
-    """Add a research annotation to a video or symptom."""
+                  diagnosis_id: Optional[int] = None, annotator: Optional[str] = None) -> int:
+    """Add a research annotation."""
     with get_connection() as conn:
         cur = conn.cursor()
         cur.execute("""
-            INSERT INTO annotations (video_id, symptom_id, annotation_type, annotation_value, annotator)
-            VALUES (%s, %s, %s, %s, %s)
+            INSERT INTO annotations (video_id, symptom_id, diagnosis_id, annotation_type, annotation_value, annotator)
+            VALUES (%s, %s, %s, %s, %s, %s)
             RETURNING id
-        """, (video_id, symptom_id, annotation_type, annotation_value, annotator))
+        """, (video_id, symptom_id, diagnosis_id, annotation_type, annotation_value, annotator))
         return cur.fetchone()[0]
 
 
-# =============================================================================
-# Statistics and Analysis Queries
-# =============================================================================
-
-def get_symptom_statistics() -> Dict[str, Any]:
-    """Get comprehensive statistics about extracted symptoms."""
+def save_engagement_snapshot(video_id: int) -> int:
+    """Save engagement metrics snapshot."""
     with get_connection() as conn:
-        cur = conn.cursor(cursor_factory=RealDictCursor)
-
-        # Total counts
-        cur.execute("SELECT COUNT(*) as count FROM videos")
-        total_videos = cur.fetchone()['count']
-
-        cur.execute("SELECT COUNT(*) as count FROM transcripts")
-        total_transcripts = cur.fetchone()['count']
-
-        cur.execute("SELECT COUNT(*) as count FROM symptoms")
-        total_symptoms = cur.fetchone()['count']
-
-        # Symptoms by category
+        cur = conn.cursor()
         cur.execute("""
-            SELECT category, COUNT(*) as count, AVG(confidence) as avg_confidence
-            FROM symptoms
-            GROUP BY category
-            ORDER BY count DESC
-        """)
-        by_category = [dict(row) for row in cur.fetchall()]
-
-        # Symptoms by severity
-        cur.execute("""
-            SELECT severity, COUNT(*) as count
-            FROM symptoms
-            WHERE severity IS NOT NULL
-            GROUP BY severity
-            ORDER BY count DESC
-        """)
-        by_severity = [dict(row) for row in cur.fetchall()]
-
-        # Symptoms by temporal pattern
-        cur.execute("""
-            SELECT temporal_pattern, COUNT(*) as count
-            FROM symptoms
-            WHERE temporal_pattern IS NOT NULL
-            GROUP BY temporal_pattern
-            ORDER BY count DESC
-        """)
-        by_temporal = [dict(row) for row in cur.fetchall()]
-
-        # Personal vs informational
-        cur.execute("""
-            SELECT is_personal_experience, COUNT(*) as count
-            FROM symptoms
-            GROUP BY is_personal_experience
-        """)
-        by_personal = [dict(row) for row in cur.fetchall()]
-
-        # Videos with symptoms
-        cur.execute("SELECT COUNT(DISTINCT video_id) as count FROM symptoms")
-        videos_with_symptoms = cur.fetchone()['count']
-
-        # Platform breakdown
-        cur.execute("""
-            SELECT platform, COUNT(*) as video_count,
-                   SUM(view_count) as total_views,
-                   AVG(duration) as avg_duration
-            FROM videos
-            GROUP BY platform
-        """)
-        by_platform = [dict(row) for row in cur.fetchall()]
-
-        avg_symptoms = total_symptoms / videos_with_symptoms if videos_with_symptoms > 0 else 0
-
-        return {
-            'total_videos': total_videos,
-            'total_transcripts': total_transcripts,
-            'total_symptoms': total_symptoms,
-            'videos_with_symptoms': videos_with_symptoms,
-            'avg_symptoms_per_video': round(avg_symptoms, 2),
-            'by_category': by_category,
-            'by_severity': by_severity,
-            'by_temporal_pattern': by_temporal,
-            'by_personal_experience': by_personal,
-            'by_platform': by_platform
-        }
-
-
-def get_cooccurrence_matrix(min_occurrences: int = 2) -> List[Dict[str, Any]]:
-    """Get symptom co-occurrence data for network analysis."""
-    with get_connection() as conn:
-        cur = conn.cursor(cursor_factory=RealDictCursor)
-        cur.execute("""
-            SELECT
-                s1.symptom as symptom_a,
-                s1.category as category_a,
-                s2.symptom as symptom_b,
-                s2.category as category_b,
-                COUNT(*) as cooccurrence_count,
-                AVG(sc.temporal_proximity_seconds) as avg_temporal_proximity
-            FROM symptom_cooccurrence sc
-            JOIN symptoms s1 ON sc.symptom_a_id = s1.id
-            JOIN symptoms s2 ON sc.symptom_b_id = s2.id
-            GROUP BY s1.symptom, s1.category, s2.symptom, s2.category
-            HAVING COUNT(*) >= %s
-            ORDER BY cooccurrence_count DESC
-        """, (min_occurrences,))
-        return [dict(row) for row in cur.fetchall()]
+            INSERT INTO engagement_snapshots (video_id, view_count, like_count, comment_count, share_count)
+            SELECT id, view_count, like_count, comment_count, share_count
+            FROM videos WHERE id = %s
+            RETURNING id
+        """, (video_id,))
+        result = cur.fetchone()
+        return result[0] if result else None
 
 
 if __name__ == '__main__':
@@ -679,9 +915,14 @@ if __name__ == '__main__':
         print(f"  Videos: {stats['total_videos']}")
         print(f"  Transcripts: {stats['total_transcripts']}")
         print(f"  Symptoms: {stats['total_symptoms']}")
-        if stats['by_platform']:
-            print(f"\n  By Platform:")
-            for p in stats['by_platform']:
-                print(f"    {p['platform']}: {p['video_count']} videos")
+        print(f"  Diagnoses: {stats['total_diagnoses']}")
+        if stats['diagnoses_by_condition']:
+            print(f"\n  Diagnoses by Condition:")
+            for d in stats['diagnoses_by_condition']:
+                print(f"    {d['condition_code']}: {d['count']}")
+        if stats['concordance_by_condition']:
+            print(f"\n  Concordance by Condition:")
+            for c in stats['concordance_by_condition']:
+                print(f"    {c['condition_code']}: {c['avg_concordance']:.2f} avg concordance ({c['sample_size']} samples)")
     except Exception as e:
         print(f"Could not fetch statistics: {e}")
