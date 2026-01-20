@@ -94,6 +94,21 @@ CONDITION_EXPECTED_SYMPTOMS = {
             'dizziness', 'nausea', 'palpitations'
         ],
         'categories': ['fatigue', 'neurological', 'autonomic']
+    },
+    'CIRS': {
+        'name': 'Chronic Inflammatory Response Syndrome',
+        'core_symptoms': [
+            'fatigue', 'weakness', 'muscle aches', 'headaches', 'light sensitivity',
+            'memory problems', 'word finding difficulty', 'concentration problems',
+            'joint pain', 'morning stiffness', 'unusual skin sensations'
+        ],
+        'common_symptoms': [
+            'sinus congestion', 'cough', 'shortness of breath', 'abdominal pain',
+            'diarrhea', 'appetite changes', 'metallic taste', 'vertigo',
+            'static shocks', 'night sweats', 'mood swings', 'ice pick pain',
+            'tearing', 'disorientation', 'skin sensitivity', 'numbness', 'tingling'
+        ],
+        'categories': ['neurological', 'musculoskeletal', 'respiratory', 'cognitive']
     }
 }
 
@@ -155,6 +170,10 @@ def init_db():
                 is_verified_creator BOOLEAN,
                 content_warning TEXT,
                 research_notes TEXT,
+                
+                -- Creator influence tier (for STRAIN social contagion analysis)
+                creator_tier TEXT CHECK (creator_tier IN ('nano', 'micro', 'mid', 'macro', 'mega')),
+                -- nano: <10K, micro: 10-100K, mid: 100K-500K, macro: 500K-1M, mega: >1M
 
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -378,6 +397,64 @@ def init_db():
         """)
 
         # =============================================================================
+        # STRAIN Framework Tables - Narrative and Social Context Analysis
+        # =============================================================================
+
+        # Narrative elements for STRAIN validation
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS narrative_elements (
+                id SERIAL PRIMARY KEY,
+                video_id INTEGER REFERENCES videos(id) ON DELETE CASCADE,
+                
+                -- Content type classification
+                content_type TEXT CHECK (content_type IN (
+                    'personal_story', 'educational', 'advice_giving', 
+                    'awareness_advocacy', 'product_promotion', 'vent_rant', 'other'
+                )),
+                
+                -- Diagnostic journey indicators (STRAIN-relevant)
+                mentions_self_diagnosis BOOLEAN,
+                mentions_professional_diagnosis BOOLEAN,
+                mentions_negative_testing BOOLEAN,
+                mentions_doctor_dismissal BOOLEAN,
+                mentions_medical_gaslighting BOOLEAN,
+                mentions_long_diagnostic_journey BOOLEAN,
+                mentions_multiple_doctors BOOLEAN,
+                years_to_diagnosis_mentioned INTEGER,
+                
+                -- Stress-symptom relationship (STRAIN core feature)
+                mentions_stress_triggers BOOLEAN,
+                mentions_symptom_flares BOOLEAN,
+                mentions_symptom_migration BOOLEAN,
+                
+                -- Social/community context (STRAIN feature)
+                mentions_online_community BOOLEAN,
+                mentions_other_creators BOOLEAN,
+                mentions_learning_from_tiktok BOOLEAN,
+                cites_medical_sources BOOLEAN,
+                
+                -- Authority claims
+                claims_healthcare_background BOOLEAN,
+                claims_expert_knowledge BOOLEAN,
+                
+                -- Illness identity indicators
+                uses_condition_as_identity BOOLEAN,
+                mentions_chronic_illness_community BOOLEAN,
+                
+                -- Key extracted quotes
+                diagnostic_journey_quotes TEXT[],
+                stress_trigger_quotes TEXT[],
+                
+                confidence REAL DEFAULT 0.5,
+                extractor_model TEXT,
+                extractor_provider TEXT,
+                extracted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                
+                UNIQUE(video_id)
+            )
+        """)
+
+        # =============================================================================
         # Transcript Quality Metrics (NEW)
         # =============================================================================
 
@@ -441,6 +518,8 @@ def init_db():
         cur.execute("CREATE INDEX IF NOT EXISTS idx_pipeline_progress_run ON pipeline_progress(run_id)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_pipeline_progress_stage ON pipeline_progress(stage)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_transcript_quality ON transcript_quality(transcript_id)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_narrative_elements_video ON narrative_elements(video_id)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_videos_creator_tier ON videos(creator_tier)")
 
         conn.commit()
         print("Database schema initialized successfully")
@@ -1391,6 +1470,121 @@ def get_run_progress_summary(run_id: int) -> Dict[str, Any]:
             'in_progress': total - by_stage.get('completed', 0) - by_stage.get('failed', 0),
             'by_stage': by_stage
         }
+
+
+# =============================================================================
+# Narrative Elements Operations (STRAIN Framework)
+# =============================================================================
+
+def insert_narrative_elements(video_id: int, elements: Dict[str, Any]) -> int:
+    """Insert narrative elements for STRAIN analysis."""
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO narrative_elements (
+                video_id, content_type,
+                mentions_self_diagnosis, mentions_professional_diagnosis,
+                mentions_negative_testing, mentions_doctor_dismissal,
+                mentions_medical_gaslighting, mentions_long_diagnostic_journey,
+                mentions_multiple_doctors, years_to_diagnosis_mentioned,
+                mentions_stress_triggers, mentions_symptom_flares,
+                mentions_symptom_migration, mentions_online_community,
+                mentions_other_creators, mentions_learning_from_tiktok,
+                cites_medical_sources, claims_healthcare_background,
+                claims_expert_knowledge, uses_condition_as_identity,
+                mentions_chronic_illness_community,
+                diagnostic_journey_quotes, stress_trigger_quotes,
+                confidence, extractor_model, extractor_provider
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (video_id) DO UPDATE SET
+                content_type = EXCLUDED.content_type,
+                mentions_self_diagnosis = EXCLUDED.mentions_self_diagnosis,
+                mentions_professional_diagnosis = EXCLUDED.mentions_professional_diagnosis,
+                mentions_negative_testing = EXCLUDED.mentions_negative_testing,
+                mentions_doctor_dismissal = EXCLUDED.mentions_doctor_dismissal,
+                mentions_medical_gaslighting = EXCLUDED.mentions_medical_gaslighting,
+                mentions_long_diagnostic_journey = EXCLUDED.mentions_long_diagnostic_journey,
+                mentions_stress_triggers = EXCLUDED.mentions_stress_triggers,
+                mentions_symptom_flares = EXCLUDED.mentions_symptom_flares,
+                confidence = EXCLUDED.confidence,
+                extracted_at = CURRENT_TIMESTAMP
+            RETURNING id
+        """, (
+            video_id,
+            elements.get('content_type'),
+            elements.get('mentions_self_diagnosis'),
+            elements.get('mentions_professional_diagnosis'),
+            elements.get('mentions_negative_testing'),
+            elements.get('mentions_doctor_dismissal'),
+            elements.get('mentions_medical_gaslighting'),
+            elements.get('mentions_long_diagnostic_journey'),
+            elements.get('mentions_multiple_doctors'),
+            elements.get('years_to_diagnosis_mentioned'),
+            elements.get('mentions_stress_triggers'),
+            elements.get('mentions_symptom_flares'),
+            elements.get('mentions_symptom_migration'),
+            elements.get('mentions_online_community'),
+            elements.get('mentions_other_creators'),
+            elements.get('mentions_learning_from_tiktok'),
+            elements.get('cites_medical_sources'),
+            elements.get('claims_healthcare_background'),
+            elements.get('claims_expert_knowledge'),
+            elements.get('uses_condition_as_identity'),
+            elements.get('mentions_chronic_illness_community'),
+            elements.get('diagnostic_journey_quotes', []),
+            elements.get('stress_trigger_quotes', []),
+            elements.get('confidence', 0.5),
+            elements.get('extractor_model'),
+            elements.get('extractor_provider')
+        ))
+        return cur.fetchone()[0]
+
+
+def get_narrative_elements(video_id: int) -> Optional[Dict[str, Any]]:
+    """Get narrative elements for a video."""
+    with get_connection() as conn:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("SELECT * FROM narrative_elements WHERE video_id = %s", (video_id,))
+        result = cur.fetchone()
+        return dict(result) if result else None
+
+
+def get_strain_indicators_summary() -> Dict[str, Any]:
+    """Get summary statistics for STRAIN framework indicators."""
+    with get_connection() as conn:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        
+        # Self-diagnosis vs professional diagnosis
+        cur.execute("""
+            SELECT 
+                COUNT(*) FILTER (WHERE mentions_self_diagnosis = TRUE) as self_diagnosed_count,
+                COUNT(*) FILTER (WHERE mentions_professional_diagnosis = TRUE) as professionally_diagnosed_count,
+                COUNT(*) FILTER (WHERE mentions_negative_testing = TRUE) as negative_testing_count,
+                COUNT(*) FILTER (WHERE mentions_doctor_dismissal = TRUE) as doctor_dismissal_count,
+                COUNT(*) FILTER (WHERE mentions_medical_gaslighting = TRUE) as medical_gaslighting_count,
+                COUNT(*) FILTER (WHERE mentions_long_diagnostic_journey = TRUE) as long_journey_count,
+                COUNT(*) FILTER (WHERE mentions_stress_triggers = TRUE) as stress_triggers_count,
+                COUNT(*) FILTER (WHERE mentions_symptom_flares = TRUE) as symptom_flares_count,
+                COUNT(*) FILTER (WHERE mentions_online_community = TRUE) as online_community_count,
+                COUNT(*) FILTER (WHERE mentions_learning_from_tiktok = TRUE) as learned_from_tiktok_count,
+                COUNT(*) as total_analyzed
+            FROM narrative_elements
+        """)
+        indicators = dict(cur.fetchone())
+        
+        # Content type breakdown
+        cur.execute("""
+            SELECT content_type, COUNT(*) as count
+            FROM narrative_elements
+            WHERE content_type IS NOT NULL
+            GROUP BY content_type
+            ORDER BY count DESC
+        """)
+        by_content_type = [dict(row) for row in cur.fetchall()]
+        
+        indicators['by_content_type'] = by_content_type
+        return indicators
 
 
 if __name__ == '__main__':

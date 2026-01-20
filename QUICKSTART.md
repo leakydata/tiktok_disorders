@@ -2,6 +2,8 @@
 
 This guide will help you get started with the EDS/MCAS/POTS Research Pipeline.
 
+This pipeline was developed for the research study: **[Public Health Narratives, Self-Diagnosis, and Symptom Attribution on TikTok](https://osf.io/5y46c)**
+
 ## Prerequisites
 
 - **Python 3.9+**

@@ -2,6 +2,39 @@
 
 A research-grade pipeline to collect and analyze TikTok/YouTube videos about Ehlers-Danlos Syndrome (EDS), Mast Cell Activation Syndrome (MCAS), and Postural Orthostatic Tachycardia Syndrome (POTS).
 
+## Research Project
+
+This pipeline was developed for the research study:
+
+**[Public Health Narratives, Self-Diagnosis, and Symptom Attribution on TikTok: A Narrative-Based Observational Study](https://osf.io/5y46c)**
+
+### Research Goals
+
+The study examines how chronic illness narratives spread on social media, with a focus on:
+- Self-diagnosis patterns and symptom attribution
+- Concordance between reported symptoms and clinical diagnostic criteria
+- Comorbidity claims and treatment discussions
+- The role of social media in shaping public health narratives
+
+### STRAIN Framework Validation
+
+This pipeline is designed to collect data for validating the **STRAIN (Stress-Activated Inflammatory Neuro-dysregulation)** framework, which proposes that many individuals reporting multisystem symptoms resembling EDS, MCAS, POTS, and CIRS may exhibit a phenotypic pattern characterized by:
+
+- **Stress-reactivity**: Symptom flares linked to psychological stressors
+- **Biomarker-silent inflammation**: Symptoms without sustained inflammatory markers
+- **Multisystem migration**: Symptoms shifting between organ systems
+- **Social/narrative context**: Symptom onset or framing after exposure to illness narratives
+- **Diagnostic seeking**: Long journeys, negative testing, multiple doctors
+
+The pipeline captures narrative elements from TikTok content to analyze:
+- Self-diagnosis vs. professional diagnosis rates
+- Mentions of doctor dismissal or "medical gaslighting"
+- Stress-trigger and symptom flare patterns
+- Online community influence on symptom framing
+- Concordance between claimed symptoms and diagnostic criteria
+
+The full research protocol, preregistration, and materials are available on OSF: https://osf.io/5y46c
+
 ## Features
 
 - **Video Discovery** - Find ALL videos from user profiles with date filtering
@@ -361,9 +394,10 @@ EXTRACTOR_PROVIDER=anthropic  # or 'ollama'
 ANTHROPIC_API_KEY=sk-...
 ANTHROPIC_MODEL=claude-sonnet-4-20250514
 
-# Or for local extraction
+# Or for local extraction with Ollama
+EXTRACTOR_PROVIDER=ollama
 OLLAMA_URL=http://localhost:11434
-OLLAMA_MODEL=llama3
+OLLAMA_MODEL=qwen2.5:20b
 
 # Transcription
 WHISPER_MODEL=large-v3
@@ -373,6 +407,45 @@ WHISPER_COMPUTE_TYPE=auto  # float16 for GPU, int8 for CPU
 # Extraction thresholds
 MIN_CONFIDENCE_SCORE=0.6
 ```
+
+## Running with Ollama (Local LLM)
+
+For local extraction without API costs, use Ollama with a capable model:
+
+### Setup Ollama
+
+```bash
+# Install Ollama (if not already installed)
+# Download from https://ollama.ai or use winget:
+winget install Ollama.Ollama
+
+# Pull a capable model (20B recommended for medical content)
+ollama pull qwen2.5:20b
+
+# Start Ollama server (runs in background)
+ollama serve
+```
+
+### Run Pipeline with Ollama
+
+```powershell
+# Full pipeline with Ollama extraction
+uv run python pipeline.py run --urls-file urls.txt --provider ollama --model qwen2.5:20b --tags EDS MCAS POTS CIRS
+
+# Extract symptoms only (if already downloaded/transcribed)
+uv run python pipeline.py extract --all --provider ollama --model qwen2.5:20b
+```
+
+### Recommended Ollama Models
+
+| Model | Size | Quality | Speed |
+|-------|------|---------|-------|
+| `qwen2.5:20b` | 20B | Excellent | Moderate |
+| `qwen2.5:14b` | 14B | Very Good | Fast |
+| `llama3:70b` | 70B | Best | Slow |
+| `mistral:7b` | 7B | Good | Very Fast |
+
+For STRAIN validation research, `qwen2.5:20b` offers the best balance of quality and speed.
 
 ## Output
 
@@ -486,4 +559,14 @@ https://www.tiktok.com/@user2/video/789
 
 ## License
 
-Research use only.
+This software is provided for research purposes only.
+
+## Citation
+
+If you use this pipeline in your research, please cite:
+
+> Public Health Narratives, Self-Diagnosis, and Symptom Attribution on TikTok: A Narrative-Based Observational Study. OSF. https://osf.io/5y46c
+
+## Contact
+
+For questions about this research project, see the OSF page: https://osf.io/5y46c
