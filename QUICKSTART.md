@@ -4,11 +4,11 @@ This guide will help you get started with the EDS/MCAS/POTS Research Pipeline.
 
 ## Prerequisites
 
-- **Python 3.8+**
+- **Python 3.9+**
 - **PostgreSQL** database
 - **FFmpeg** (for audio extraction)
 - **CUDA-capable GPU** (RTX 4090 recommended for best performance)
-- **Anthropic API key** (for Claude symptom extraction)
+- **Anthropic API key** or **Ollama** (for symptom extraction)
 
 ## Installation
 
@@ -17,10 +17,12 @@ This guide will help you get started with the EDS/MCAS/POTS Research Pipeline.
 ```bash
 cd tiktok_disorders
 uv sync
-# Optional: OpenAI Whisper backend (requires Python < 3.10)
-# uv sync --extra openai-whisper
+
 # Optional: UMAP visualization support
-# uv sync --extra umap
+uv sync --extra umap
+
+# Install Playwright browsers for TikTok discovery
+uv run playwright install
 ```
 
 ### 2. Install system dependencies
@@ -59,16 +61,16 @@ cp .env.example .env
 
 Edit `.env` and set:
 - `DATABASE_URL` - Your PostgreSQL connection string
-- `ANTHROPIC_API_KEY` - Your Claude API key
- - `EXTRACTOR_PROVIDER` - `anthropic` or `ollama`
- - `OLLAMA_MODEL` - Ollama model name (default: `gpt-oss:20b`)
+- `ANTHROPIC_API_KEY` - Your Claude API key (if using Anthropic)
+- `EXTRACTOR_PROVIDER` - `anthropic` or `ollama`
+- `OLLAMA_MODEL` - Ollama model name (if using Ollama)
 
 Example:
 ```
 DATABASE_URL=postgresql://username:password@localhost:5432/tiktok_disorders
 ANTHROPIC_API_KEY=sk-ant-...
 EXTRACTOR_PROVIDER=ollama
-OLLAMA_MODEL=gpt-oss:20b
+OLLAMA_MODEL=llama3
 OLLAMA_URL=http://localhost:11434
 ```
 
@@ -80,13 +82,26 @@ uv run python scripts/init_db.py
 
 ## Basic Usage
 
-### Option 1: Process a single video
+### Option 1: Discover and Process Videos (Recommended)
 
 ```bash
-uv run python scripts/run_pipeline.py --url "https://youtube.com/watch?v=VIDEO_ID" --tags EDS,POTS
+# 1. Find videos from hashtags
+uv run python scripts/discover.py --hashtag EDS --hashtag POTS --max-videos 100 --output urls.txt
+
+# 2. Expand to get all videos from discovered users
+uv run python scripts/discover.py --expand-users urls.txt --append
+
+# 3. Run the full pipeline
+uv run python pipeline.py run --urls-file urls.txt --tags EDS POTS
 ```
 
-### Option 2: Process multiple videos
+### Option 2: Process a Single Video
+
+```bash
+uv run python pipeline.py run "https://tiktok.com/@user/video/123" --tags EDS
+```
+
+### Option 3: Process from a URL File
 
 1. Create a file with URLs (one per line):
 
@@ -98,51 +113,70 @@ cp urls.txt.example urls.txt
 2. Run the pipeline:
 
 ```bash
-uv run python scripts/run_pipeline.py --file urls.txt --tags EDS,MCAS,POTS --analyze
+uv run python pipeline.py run --urls-file urls.txt --tags EDS MCAS POTS
 ```
 
-The `--analyze` flag will automatically run clustering analysis after processing all videos.
+## Discovery Commands
 
-### Option 3: Run stages individually
+Find new videos to analyze:
 
-**Download videos:**
 ```bash
-uv run python scripts/download.py --url "https://youtube.com/watch?v=VIDEO_ID"
+# From a user's profile (via video URL)
+uv run python scripts/discover.py --url "https://tiktok.com/@user/video/123"
+
+# From a username directly
+uv run python scripts/discover.py --user chronicallychillandhot
+
+# From hashtags
+uv run python scripts/discover.py --hashtag ehlersdanlos --hashtag chronicillness
+
+# From keyword search
+uv run python scripts/discover.py --search "ehlers danlos syndrome"
+
+# Expand all users in existing file
+uv run python scripts/discover.py --expand-users urls.txt --append
 ```
 
-**Transcribe audio:**
+## Pipeline Commands
+
+All pipeline operations use subcommands:
+
 ```bash
-uv run python scripts/transcribe.py --video-id 1 --model large-v3
+# Full pipeline (download + transcribe + extract)
+uv run python pipeline.py run --urls-file urls.txt
+
+# Download only
+uv run python pipeline.py download --urls-file urls.txt
+
+# Transcribe all untranscribed videos
+uv run python pipeline.py transcribe --all
+
+# Extract symptoms from all unprocessed transcripts
+uv run python pipeline.py extract --all
+
+# Run analysis
+uv run python pipeline.py analyze
+
+# Show statistics
+uv run python pipeline.py stats --detailed
 ```
 
-**Extract symptoms:**
-```bash
-uv run python scripts/extract_symptoms.py --video-id 1 --min-confidence 0.6
-```
+## Recovery Workflow
 
-**Analyze patterns:**
-```bash
-uv run python scripts/analyze.py --cluster-method kmeans --viz-method umap
-```
-
-### Backfill database from existing transcripts
-```bash
-uv run python scripts/backfill_transcripts.py --dir data/transcripts
-# Optionally extract symptoms after backfill
-uv run python scripts/backfill_transcripts.py --dir data/transcripts --extract --provider ollama --model gpt-oss:20b
-```
-
-## View Statistics
+If the pipeline fails partway through:
 
 ```bash
-# Basic stats
-uv run python scripts/stats.py
+# 1. Check what's incomplete
+uv run python pipeline.py stats
 
-# Detailed stats
-uv run python scripts/stats.py --detailed
+# 2. Complete any missing transcriptions
+uv run python pipeline.py transcribe --all
 
-# Export to JSON
-uv run python scripts/stats.py --export-json stats.json
+# 3. Extract symptoms from completed transcripts
+uv run python pipeline.py extract --all
+
+# 4. Run analysis
+uv run python pipeline.py analyze
 ```
 
 ## Configuration Tips
@@ -151,28 +185,21 @@ uv run python scripts/stats.py --export-json stats.json
 
 The pipeline is optimized for your hardware! Use these settings for best performance:
 
-- **Whisper model**: `large-v3` (highest quality transcription)
-- **Parallel extraction**: Enabled (processes multiple videos simultaneously)
-- **Clustering**: Can handle large datasets with advanced algorithms
-
 ```bash
-uv run python scripts/run_pipeline.py \
-  --file urls.txt \
+uv run python pipeline.py run \
+  --urls-file urls.txt \
   --whisper-model large-v3 \
   --min-confidence 0.6 \
-  --analyze
+  --tags EDS MCAS POTS
 ```
 
 ### For Limited Resources
 
 If running on a less powerful system:
 
-- **Whisper model**: `base` or `small`
-- **Parallel extraction**: Disable with `--no-parallel`
-
 ```bash
-uv run python scripts/run_pipeline.py \
-  --file urls.txt \
+uv run python pipeline.py run \
+  --urls-file urls.txt \
   --whisper-model base \
   --no-parallel
 ```
@@ -205,16 +232,21 @@ The pipeline generates:
 - Verify FFmpeg is installed: `ffmpeg -version`
 - Add FFmpeg to your system PATH
 
+### TikTok discovery errors
+
+- Install Playwright browsers: `uv run playwright install`
+- If getting 403 errors, increase delays or try later
+
 ### API rate limits
 
 If you hit Claude API rate limits:
-- Reduce `--max-workers` in extraction
 - Use `--no-parallel` flag
 - Process videos in smaller batches
+- Switch to Ollama for local extraction
 
 ## Next Steps
 
-1. **Collect videos**: Find relevant YouTube/TikTok videos about EDS, MCAS, or POTS
+1. **Discover videos**: Use hashtag and user discovery to build your dataset
 2. **Run the pipeline**: Process videos and extract symptoms
 3. **Analyze patterns**: Use clustering to discover symptom patterns
 4. **Iterate**: Adjust confidence thresholds and clustering parameters
@@ -222,8 +254,5 @@ If you hit Claude API rate limits:
 
 ## Getting Help
 
-- Check the main [README.md](README.md) for architecture details
-- See [Issue #1](https://github.com/leakydata/tiktok_disorders/issues/1) for implementation notes
+- Check the main [README.md](README.md) for full documentation
 - Review module docstrings for API details
-
-Happy researching! 🔬

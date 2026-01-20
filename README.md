@@ -4,6 +4,7 @@ A research-grade pipeline to collect and analyze TikTok/YouTube videos about Ehl
 
 ## Features
 
+- **Video Discovery** - Find videos from user profiles, hashtags, and keyword searches
 - **Video Download** - Download from TikTok, YouTube, and other platforms via yt-dlp
 - **GPU-Accelerated Transcription** - Whisper large-v3 on CUDA (optimized for RTX 4090)
 - **AI-Powered Extraction** - Extract symptoms, diagnoses, and treatments using Claude or Ollama
@@ -13,6 +14,7 @@ A research-grade pipeline to collect and analyze TikTok/YouTube videos about Ehl
 - **Cluster Analysis** - K-means/DBSCAN clustering with silhouette validation
 - **Resumable Runs** - Progress tracking allows interrupted runs to be resumed
 - **Duplicate Detection** - Prevents downloading the same video twice
+- **Granular Recovery** - Run individual pipeline stages to recover from failures
 
 ## Requirements
 
@@ -32,6 +34,9 @@ uv sync --group cuda
 
 # Optional: UMAP for dimensionality reduction
 uv sync --extra umap
+
+# Install Playwright browsers for TikTok discovery (one-time)
+uv run playwright install
 
 # Set up environment
 cp .env.example .env
@@ -71,67 +76,171 @@ brew install ffmpeg
 createdb tiktok_disorders
 
 # Initialize schema (creates all tables)
-python database.py
+uv run python scripts/init_db.py
 ```
 
 ## Usage
 
-### Process Videos
+The pipeline uses subcommands for different operations:
+
+### Discover New Videos
+
+Find videos from TikTok users, hashtags, and searches:
 
 ```bash
-# Process a single video
-python pipeline.py "https://www.tiktok.com/@user/video/123"
+# Get all videos from a user (from a video URL)
+uv run python scripts/discover.py --url "https://tiktok.com/@user/video/123"
 
-# Process multiple videos
-python pipeline.py "url1" "url2" "url3"
+# Get all videos from a username directly
+uv run python scripts/discover.py --user chronicallychillandhot
 
-# Process from a file (one URL per line)
-python pipeline.py --urls-file urls.txt
+# Expand all users from an existing URL file
+uv run python scripts/discover.py --expand-users urls.txt --append
 
-# Combine file and CLI URLs (deduplicates automatically)
-python pipeline.py --urls-file urls.txt "https://extra-url.com/video"
+# Find videos by hashtag
+uv run python scripts/discover.py --hashtag EDS --hashtag POTS --max-videos 200
 
-# Use Ollama instead of Claude for extraction
-python pipeline.py --provider ollama --model llama3 "url"
+# Search by keyword
+uv run python scripts/discover.py --search "ehlers danlos syndrome" --max-videos 100
+
+# Combine methods
+uv run python scripts/discover.py --hashtag chronicillness --search "hypermobility" --append
 ```
 
-### Check Status and Statistics
+### Run Full Pipeline
+
+Process videos through all stages (download, transcribe, extract):
+
+```bash
+# Process from a file of URLs
+uv run python pipeline.py run --urls-file urls.txt --tags EDS MCAS POTS
+
+# Process specific URLs
+uv run python pipeline.py run "https://tiktok.com/@user/video/123" --tags EDS
+
+# Use Ollama instead of Claude for extraction
+uv run python pipeline.py run --urls-file urls.txt --provider ollama --model llama3
+
+# Resume an interrupted run
+uv run python pipeline.py run --resume 5
+```
+
+### Granular Operations (Recovery)
+
+Run individual stages when you need to recover from failures:
+
+```bash
+# Download only
+uv run python pipeline.py download --urls-file urls.txt
+uv run python pipeline.py download --url "https://tiktok.com/@user/video/123"
+
+# Transcribe all untranscribed videos
+uv run python pipeline.py transcribe --all
+
+# Transcribe a specific video
+uv run python pipeline.py transcribe --video-id 42
+
+# Extract symptoms from all unprocessed transcripts
+uv run python pipeline.py extract --all
+
+# Re-extract with different settings
+uv run python pipeline.py extract --all --min-confidence 0.8 --provider ollama
+```
+
+### Analysis and Statistics
 
 ```bash
 # Show database statistics
-python pipeline.py --stats
+uv run python pipeline.py stats
+uv run python pipeline.py stats --detailed
 
-# Show status of latest run
-python pipeline.py --status
-
-# Resume an interrupted run
-python pipeline.py --resume <run_id>
-```
-
-### Run Analysis
-
-```bash
-# Cluster analysis on collected data
-python pipeline.py --analyze
+# Run clustering analysis
+uv run python pipeline.py analyze
+uv run python pipeline.py analyze --cluster-method dbscan --viz-method tsne
 ```
 
 ### Generate Reports
 
 ```bash
 # Full analysis report (JSON + summary)
-python reports.py
+uv run python reports.py
 
 # Export all data to CSV for Excel/R/Python
-python reports.py --export-csv
+uv run python reports.py --export-csv
 
 # Individual reports
-python reports.py --diagnoses    # Diagnosis breakdown with concordance
-python reports.py --symptoms     # Symptom analysis by category/severity
-python reports.py --treatments   # Treatment effectiveness analysis
-python reports.py --creators     # Analysis by video creator
+uv run python reports.py --diagnoses    # Diagnosis breakdown with concordance
+uv run python reports.py --symptoms     # Symptom analysis by category/severity
+uv run python reports.py --treatments   # Treatment effectiveness analysis
+uv run python reports.py --creators     # Analysis by video creator
 ```
 
 Reports are saved to `data/reports/` and CSV exports to `data/exports/`.
+
+## Command Reference
+
+| Command | Description |
+|---------|-------------|
+| `pipeline.py run` | Full pipeline (download, transcribe, extract) |
+| `pipeline.py download` | Download videos only |
+| `pipeline.py transcribe` | Transcribe audio only |
+| `pipeline.py extract` | Extract symptoms only |
+| `pipeline.py analyze` | Run clustering and visualization |
+| `pipeline.py stats` | Show database statistics |
+| `pipeline.py discover` | Find new TikTok videos |
+| `scripts/discover.py` | Standalone discovery script |
+| `scripts/init_db.py` | Initialize database schema |
+
+## Example Workflows
+
+### Initial Dataset Collection
+
+```bash
+# 1. Find videos about EDS from popular hashtags
+uv run python scripts/discover.py --hashtag ehlersdanlos --max-videos 500 --output urls.txt
+uv run python scripts/discover.py --hashtag hypermobility --max-videos 200 --append
+
+# 2. Expand to get complete profiles for all discovered users
+uv run python scripts/discover.py --expand-users urls.txt --append
+
+# 3. Process everything
+uv run python pipeline.py run --urls-file urls.txt --tags EDS
+```
+
+### Recovery After Failure
+
+```bash
+# Check what's missing
+uv run python pipeline.py stats
+
+# Finish any incomplete transcriptions
+uv run python pipeline.py transcribe --all
+
+# Extract symptoms from transcripts
+uv run python pipeline.py extract --all
+
+# Re-run analysis
+uv run python pipeline.py analyze
+```
+
+### Adding a New Condition to Study
+
+```bash
+# Search for MCAS content
+uv run python scripts/discover.py --hashtag MCAS --hashtag mastcellactivation --max-videos 300 --output mcas_urls.txt
+
+# Process new videos
+uv run python pipeline.py run --urls-file mcas_urls.txt --tags MCAS
+```
+
+## Research Hashtags
+
+Suggested hashtags for chronic illness research:
+
+- **EDS**: `#ehlersdanlos`, `#EDS`, `#hypermobility`, `#zebra`
+- **POTS**: `#POTS`, `#dysautonomia`, `#posturaltachycardia`
+- **MCAS**: `#MCAS`, `#mastcellactivation`, `#histamineintolerance`
+- **General**: `#chronicillness`, `#spoonie`, `#invisibleillness`, `#chronicpain`
 
 ## Pipeline Stages
 
@@ -233,6 +342,12 @@ If transcription runs on CPU:
 rm -rf .venv
 uv sync --group cuda
 ```
+
+### TikTok Discovery Issues
+If discovery fails with 403 errors:
+1. Install Playwright browsers: `uv run playwright install`
+2. Increase delays: `--min-delay 5 --max-delay 10`
+3. Try again later (TikTok rate limits)
 
 ### TikTok Impersonation Warning
 The warning about impersonation is normal - curl_cffi is included to handle this.

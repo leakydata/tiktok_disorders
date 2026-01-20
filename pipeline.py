@@ -309,115 +309,287 @@ class ResearchPipeline:
         }
 
 
-if __name__ == '__main__':
-    import sys
-    import argparse
+def read_urls_file(path: str) -> List[str]:
+    """
+    Read a text file containing one URL per line.
+    - Ignores blank lines
+    - Supports comments starting with # or //
+    - Trims whitespace
+    """
+    p = Path(path)
+    if not p.exists():
+        raise FileNotFoundError(f"URLs file not found: {p}")
 
-    def read_urls_file(path: str) -> List[str]:
-        """
-        Read a text file containing one URL per line.
-        - Ignores blank lines
-        - Supports comments starting with # or //
-        - Trims whitespace
-        """
-        p = Path(path)
-        if not p.exists():
-            raise FileNotFoundError(f"URLs file not found: {p}")
+    urls_out: List[str] = []
+    for raw in p.read_text(encoding='utf-8').splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        if line.startswith('#') or line.startswith('//'):
+            continue
+        # Allow inline comments: "<url> # comment" or "<url> // comment"
+        if ' #' in line:
+            line = line.split(' #', 1)[0].strip()
+        if ' //' in line:
+            line = line.split(' //', 1)[0].strip()
+        if line:
+            urls_out.append(line)
 
-        urls_out: List[str] = []
-        for raw in p.read_text(encoding='utf-8').splitlines():
-            line = raw.strip()
-            if not line:
-                continue
-            if line.startswith('#') or line.startswith('//'):
-                continue
-            # Allow inline comments: "<url> # comment" or "<url> // comment"
-            if ' #' in line:
-                line = line.split(' #', 1)[0].strip()
-            if ' //' in line:
-                line = line.split(' //', 1)[0].strip()
-            if line:
-                urls_out.append(line)
+    return urls_out
 
-        return urls_out
 
-    def merge_and_dedupe_urls(cli_urls: List[str], file_urls: List[str]) -> List[str]:
-        """
-        Keep first-seen order while removing duplicates.
-        """
-        seen = set()
-        merged: List[str] = []
-        for u in (file_urls + cli_urls):
-            u2 = (u or "").strip()
-            if not u2:
-                continue
-            if u2 in seen:
-                continue
-            seen.add(u2)
-            merged.append(u2)
-        return merged
+def merge_and_dedupe_urls(cli_urls: List[str], file_urls: List[str]) -> List[str]:
+    """Keep first-seen order while removing duplicates."""
+    seen = set()
+    merged: List[str] = []
+    for u in (file_urls + cli_urls):
+        u2 = (u or "").strip()
+        if not u2:
+            continue
+        if u2 in seen:
+            continue
+        seen.add(u2)
+        merged.append(u2)
+    return merged
 
-    parser = argparse.ArgumentParser(description='EDS/MCAS/POTS Research Pipeline')
-    parser.add_argument('urls', nargs='*', help='Video URLs to process')
-    parser.add_argument('--urls-file', default=None, help='Path to text file with one URL per line')
-    parser.add_argument('--analyze', action='store_true', help='Run analysis on collected data')
-    parser.add_argument('--resume', type=int, help='Resume a previous run by ID')
-    parser.add_argument('--status', action='store_true', help='Show status of the latest run')
-    parser.add_argument('--stats', action='store_true', help='Show database statistics')
-    parser.add_argument('--whisper-model', default='large-v3', help='Whisper model size')
-    parser.add_argument('--provider', default=None, help='Extractor provider (anthropic or ollama)')
-    parser.add_argument('--model', default=None, help='Extractor model name')
-    parser.add_argument('--tags', nargs='+', default=['EDS', 'MCAS', 'POTS'], help='Tags for videos')
 
-    args = parser.parse_args()
+# =============================================================================
+# Subcommand handlers
+# =============================================================================
 
-    # Initialize pipeline (optimized for RTX 4090!)
+def cmd_run(args):
+    """Handle the 'run' subcommand - full pipeline processing."""
+    from database import get_connection
+
     pipeline = ResearchPipeline(
         whisper_model=args.whisper_model,
-        min_confidence=0.6,
-        parallel_extraction=True,
+        min_confidence=args.min_confidence,
+        parallel_extraction=not args.no_parallel,
         extractor_provider=args.provider,
         extractor_model=args.model
     )
 
-    # --- status / stats / analyze / resume are mutually exclusive-ish with processing ---
-    if args.status:
-        run_id = args.resume or get_latest_run_id()
-        if run_id:
-            progress = get_run_progress_summary(run_id)
-            print(f"\n{'='*60}")
-            print(f"Run {run_id} Status:")
-            print(f"  Total URLs: {progress['total']}")
-            print(f"  Completed: {progress['completed']}")
-            print(f"  Failed: {progress['failed']}")
-            print(f"  In Progress: {progress['in_progress']}")
-            print(f"\nBy stage:")
-            for stage, count in progress['by_stage'].items():
-                print(f"  {stage}: {count}")
-            print('='*60)
-        else:
-            print("No processing runs found")
-        sys.exit(0)
+    if args.resume:
+        results = pipeline.process_batch([], tags=args.tags, resume_run_id=args.resume)
+    else:
+        file_urls: List[str] = []
+        if args.urls_file:
+            file_urls = read_urls_file(args.urls_file)
 
-    if args.stats:
-        stats = get_symptom_statistics()
-        print(f"\n{'='*60}")
-        print("Database Statistics:")
-        print(f"  Videos: {stats['total_videos']}")
-        print(f"  Transcripts: {stats['total_transcripts']}")
-        print(f"  Symptoms: {stats['total_symptoms']}")
-        print(f"  Diagnoses: {stats['total_diagnoses']}")
+        merged_urls = merge_and_dedupe_urls(args.urls or [], file_urls)
 
-        if stats['diagnoses_by_condition']:
-            print(f"\nDiagnoses by Condition:")
-            for d in stats['diagnoses_by_condition']:
-                print(f"  {d['condition_code']}: {d['count']}")
+        if not merged_urls:
+            print("Error: No URLs provided. Use --urls-file or provide URLs as arguments.")
+            return 1
 
-        if stats['concordance_by_condition']:
-            print(f"\nConcordance by Condition:")
-            for c in stats['concordance_by_condition']:
-                print(f"  {c['condition_code']}: {c['avg_concordance']:.2f} avg ({c['sample_size']} samples)")
+        results = pipeline.process_batch(merged_urls, tags=args.tags)
 
+    print("\n" + json.dumps(results, indent=2, default=str))
+    return 0
+
+
+def cmd_download(args):
+    """Handle the 'download' subcommand - download only."""
+    downloader = VideoDownloader()
+
+    if args.url:
+        urls = [args.url]
+    elif args.urls_file:
+        urls = read_urls_file(args.urls_file)
+    else:
+        print("Error: Provide --url or --urls-file")
+        return 1
+
+    print(f"Downloading {len(urls)} video(s)...")
+    success_count = 0
+    for i, url in enumerate(urls, 1):
+        print(f"\n[{i}/{len(urls)}] {url}")
+        try:
+            result = downloader.download_audio(url, args.tags)
+            if result.get('already_existed'):
+                print(f"  Already exists: {result['audio_path']}")
+            else:
+                print(f"  Downloaded: {result['audio_path']}")
+            success_count += 1
+        except Exception as e:
+            print(f"  Error: {e}")
+
+    print(f"\nDownloaded {success_count}/{len(urls)} videos")
+    return 0
+
+
+def cmd_transcribe(args):
+    """Handle the 'transcribe' subcommand - transcribe only."""
+    from database import get_connection
+
+    transcriber = AudioTranscriber(model_size=args.whisper_model)
+
+    if args.video_id:
+        video_ids = [args.video_id]
+    elif args.all:
+        # Find videos without transcripts
+        with get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT v.id FROM videos v
+                LEFT JOIN transcripts t ON v.id = t.video_id
+                WHERE t.id IS NULL AND v.audio_path IS NOT NULL
+            """)
+            video_ids = [row[0] for row in cur.fetchall()]
+
+        if not video_ids:
+            print("All videos already transcribed!")
+            return 0
+
+        print(f"Found {len(video_ids)} video(s) to transcribe")
+    else:
+        print("Error: Provide --video-id or --all")
+        return 1
+
+    success_count = 0
+    for i, vid in enumerate(video_ids, 1):
+        print(f"\n[{i}/{len(video_ids)}] Transcribing video ID {vid}...")
+        try:
+            result = transcriber.transcribe(vid)
+            if result.get('already_existed'):
+                print(f"  Already transcribed: {result['word_count']} words")
+            else:
+                print(f"  Transcribed: {result['word_count']} words")
+            success_count += 1
+        except Exception as e:
+            print(f"  Error: {e}")
+
+    print(f"\nTranscribed {success_count}/{len(video_ids)} videos")
+    return 0
+
+
+def cmd_extract(args):
+    """Handle the 'extract' subcommand - extract symptoms only."""
+    from database import get_connection
+
+    extractor = SymptomExtractor(
+        max_workers=10 if not args.no_parallel else 1,
+        provider=args.provider,
+        model=args.model
+    )
+
+    if args.video_id:
+        video_ids = [args.video_id]
+    elif args.all:
+        # Find videos with transcripts but no symptoms
+        with get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT DISTINCT t.video_id
+                FROM transcripts t
+                LEFT JOIN symptoms s ON t.video_id = s.video_id
+                WHERE s.id IS NULL
+            """)
+            video_ids = [row[0] for row in cur.fetchall()]
+
+        if not video_ids:
+            print("All transcripts already processed!")
+            return 0
+
+        print(f"Found {len(video_ids)} video(s) to extract symptoms from")
+    else:
+        print("Error: Provide --video-id or --all")
+        return 1
+
+    total_symptoms = 0
+    success_count = 0
+    for i, vid in enumerate(video_ids, 1):
+        print(f"\n[{i}/{len(video_ids)}] Extracting from video ID {vid}...")
+        try:
+            result = extractor.extract_all(vid)
+            if result.get('success'):
+                symptoms = result.get('symptoms', {}).get('symptoms_saved', 0)
+                diagnoses = result.get('diagnoses', {}).get('diagnoses_saved', 0)
+                treatments = result.get('treatments', {}).get('treatments_saved', 0)
+                print(f"  Extracted: {symptoms} symptoms, {diagnoses} diagnoses, {treatments} treatments")
+                total_symptoms += symptoms
+                success_count += 1
+            else:
+                print(f"  Failed: {result.get('error', 'Unknown error')}")
+        except Exception as e:
+            print(f"  Error: {e}")
+
+    print(f"\nProcessed {success_count}/{len(video_ids)} videos")
+    print(f"Total symptoms extracted: {total_symptoms}")
+    return 0
+
+
+def cmd_analyze(args):
+    """Handle the 'analyze' subcommand - run analysis."""
+    analyzer = SymptomAnalyzer(min_confidence=args.min_confidence)
+
+    print("Loading symptom data...")
+    df = analyzer.load_symptom_data()
+
+    if len(df) < 10:
+        print(f"Not enough data for analysis (need at least 10 symptoms, have {len(df)})")
+        return 1
+
+    print(f"Loaded {len(df)} symptoms")
+    print(f"Preparing features using {args.feature_method} method...")
+    features = analyzer.prepare_features(df, method=args.feature_method)
+
+    print(f"Clustering using {args.cluster_method}...")
+    if args.cluster_method == 'kmeans':
+        labels, metrics = analyzer.cluster_kmeans(
+            features,
+            n_clusters=args.clusters,
+            optimize=(args.clusters is None)
+        )
+    else:
+        labels, metrics = analyzer.cluster_dbscan(features)
+
+    print(f"Generating visualizations using {args.viz_method}...")
+    viz_path = analyzer.visualize_clusters(df, features, labels, method=args.viz_method)
+
+    print("Generating cluster report...")
+    report = analyzer.generate_cluster_report(df, labels)
+    export_path = analyzer.export_results(df, labels)
+
+    print(f"\n{'='*60}")
+    print("ANALYSIS COMPLETE")
+    print('='*60)
+    print(f"Total symptoms: {report['total_symptoms']}")
+    print(f"Number of clusters: {report['n_clusters']}")
+    print(f"Visualization: {viz_path}")
+    print(f"Export: {export_path}")
+
+    print(f"\nCluster Summary:")
+    for cluster in report['clusters']:
+        print(f"  Cluster {cluster['cluster_id']}: {cluster['size']} symptoms")
+
+    return 0
+
+
+def cmd_stats(args):
+    """Handle the 'stats' subcommand - show statistics."""
+    stats = get_symptom_statistics()
+
+    print(f"\n{'='*60}")
+    print("DATABASE STATISTICS")
+    print('='*60)
+    print(f"\nOverview:")
+    print(f"  Videos: {stats['total_videos']}")
+    print(f"  Transcripts: {stats['total_transcripts']}")
+    print(f"  Symptoms: {stats['total_symptoms']}")
+    print(f"  Diagnoses: {stats['total_diagnoses']}")
+
+    if stats['diagnoses_by_condition']:
+        print(f"\nDiagnoses by Condition:")
+        for d in stats['diagnoses_by_condition']:
+            print(f"  {d['condition_code']}: {d['count']}")
+
+    if stats['concordance_by_condition']:
+        print(f"\nConcordance by Condition:")
+        for c in stats['concordance_by_condition']:
+            print(f"  {c['condition_code']}: {c['avg_concordance']:.2f} avg ({c['sample_size']} samples)")
+
+    if args.detailed:
         treatment_stats = get_treatment_statistics()
         if treatment_stats['top_treatments']:
             print(f"\nTop Treatments:")
@@ -431,30 +603,152 @@ if __name__ == '__main__':
             for c in comorbidity[:10]:
                 print(f"  {c['condition_a']} + {c['condition_b']}: {c['video_count']} videos")
 
-        print('='*60)
-        sys.exit(0)
+        # Run status
+        run_id = get_latest_run_id()
+        if run_id:
+            progress = get_run_progress_summary(run_id)
+            print(f"\nLatest Run (ID {run_id}):")
+            print(f"  Total URLs: {progress['total']}")
+            print(f"  Completed: {progress['completed']}")
+            print(f"  Failed: {progress['failed']}")
 
-    if args.analyze:
-        results = pipeline.analyze_all()
-        print(json.dumps(results, indent=2, default=str))
-        sys.exit(0)
+    print('='*60)
+    return 0
 
-    if args.resume:
-        results = pipeline.process_batch([], tags=args.tags, resume_run_id=args.resume)
-        print("\n" + json.dumps(results, indent=2, default=str))
-        sys.exit(0)
 
-    # --- processing mode: from file and/or CLI args ---
-    file_urls: List[str] = []
-    if args.urls_file:
-        file_urls = read_urls_file(args.urls_file)
+def cmd_discover(args):
+    """Handle the 'discover' subcommand - find new videos."""
+    import subprocess
+    import sys
 
-    merged_urls = merge_and_dedupe_urls(args.urls, file_urls)
+    # Build the command to run discover.py
+    cmd = [sys.executable, 'scripts/discover.py']
 
-    if merged_urls:
-        results = pipeline.process_batch(merged_urls, tags=args.tags)
-        print("\n" + json.dumps(results, indent=2, default=str))
-    else:
+    if args.url:
+        for url in args.url:
+            cmd.extend(['--url', url])
+    if args.user:
+        for user in args.user:
+            cmd.extend(['--user', user])
+    if args.expand_users:
+        cmd.extend(['--expand-users', args.expand_users])
+    if args.hashtag:
+        for tag in args.hashtag:
+            cmd.extend(['--hashtag', tag])
+    if args.search:
+        for query in args.search:
+            cmd.extend(['--search', query])
+    if args.output:
+        cmd.extend(['--output', args.output])
+    if args.append:
+        cmd.append('--append')
+    if args.max_videos:
+        cmd.extend(['--max-videos', str(args.max_videos)])
+
+    # Run the discover script
+    result = subprocess.run(cmd)
+    return result.returncode
+
+
+def main():
+    import sys
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description='EDS/MCAS/POTS Research Pipeline',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Full pipeline
+  python pipeline.py run --urls-file urls.txt --tags EDS MCAS POTS
+
+  # Granular operations
+  python pipeline.py download --urls-file urls.txt
+  python pipeline.py transcribe --all
+  python pipeline.py extract --all
+
+  # Analysis
+  python pipeline.py analyze --cluster-method kmeans
+  python pipeline.py stats --detailed
+
+  # Discovery
+  python pipeline.py discover --hashtag EDS --max-videos 100
+        """
+    )
+    subparsers = parser.add_subparsers(dest='command', help='Available commands')
+
+    # --- run subcommand ---
+    run_parser = subparsers.add_parser('run', help='Run full pipeline (download, transcribe, extract)')
+    run_parser.add_argument('urls', nargs='*', help='Video URLs to process')
+    run_parser.add_argument('--urls-file', help='Path to text file with URLs')
+    run_parser.add_argument('--tags', nargs='+', default=['EDS', 'MCAS', 'POTS'], help='Tags for videos')
+    run_parser.add_argument('--resume', type=int, help='Resume a previous run by ID')
+    run_parser.add_argument('--whisper-model', default='large-v3', help='Whisper model size')
+    run_parser.add_argument('--provider', help='Extractor provider (anthropic or ollama)')
+    run_parser.add_argument('--model', help='Extractor model name')
+    run_parser.add_argument('--min-confidence', type=float, default=0.6, help='Min symptom confidence')
+    run_parser.add_argument('--no-parallel', action='store_true', help='Disable parallel extraction')
+    run_parser.set_defaults(func=cmd_run)
+
+    # --- download subcommand ---
+    dl_parser = subparsers.add_parser('download', help='Download videos only')
+    dl_parser.add_argument('--url', help='Single video URL')
+    dl_parser.add_argument('--urls-file', help='Path to text file with URLs')
+    dl_parser.add_argument('--tags', nargs='+', default=[], help='Tags for videos')
+    dl_parser.set_defaults(func=cmd_download)
+
+    # --- transcribe subcommand ---
+    tr_parser = subparsers.add_parser('transcribe', help='Transcribe audio only')
+    tr_parser.add_argument('--video-id', type=int, help='Single video database ID')
+    tr_parser.add_argument('--all', action='store_true', help='Transcribe all untranscribed videos')
+    tr_parser.add_argument('--whisper-model', default='large-v3', help='Whisper model size')
+    tr_parser.set_defaults(func=cmd_transcribe)
+
+    # --- extract subcommand ---
+    ex_parser = subparsers.add_parser('extract', help='Extract symptoms only')
+    ex_parser.add_argument('--video-id', type=int, help='Single video database ID')
+    ex_parser.add_argument('--all', action='store_true', help='Extract from all unprocessed transcripts')
+    ex_parser.add_argument('--provider', help='Extractor provider (anthropic or ollama)')
+    ex_parser.add_argument('--model', help='Extractor model name')
+    ex_parser.add_argument('--min-confidence', type=float, default=0.6, help='Min symptom confidence')
+    ex_parser.add_argument('--no-parallel', action='store_true', help='Disable parallel extraction')
+    ex_parser.set_defaults(func=cmd_extract)
+
+    # --- analyze subcommand ---
+    an_parser = subparsers.add_parser('analyze', help='Run clustering and visualization')
+    an_parser.add_argument('--cluster-method', choices=['kmeans', 'dbscan'], default='kmeans')
+    an_parser.add_argument('--viz-method', choices=['pca', 'tsne', 'umap'], default='umap')
+    an_parser.add_argument('--clusters', type=int, help='Number of clusters (auto if not set)')
+    an_parser.add_argument('--min-confidence', type=float, default=0.6, help='Min symptom confidence')
+    an_parser.add_argument('--feature-method', choices=['tfidf', 'combined'], default='combined')
+    an_parser.set_defaults(func=cmd_analyze)
+
+    # --- stats subcommand ---
+    st_parser = subparsers.add_parser('stats', help='Show database statistics')
+    st_parser.add_argument('--detailed', action='store_true', help='Show detailed statistics')
+    st_parser.set_defaults(func=cmd_stats)
+
+    # --- discover subcommand ---
+    disc_parser = subparsers.add_parser('discover', help='Discover new TikTok videos')
+    disc_parser.add_argument('--url', action='append', help='Video URL to expand user from')
+    disc_parser.add_argument('--user', action='append', help='TikTok username')
+    disc_parser.add_argument('--expand-users', help='File to extract and expand users from')
+    disc_parser.add_argument('--hashtag', action='append', help='Hashtag to search')
+    disc_parser.add_argument('--search', action='append', help='Search query')
+    disc_parser.add_argument('--output', default='urls.txt', help='Output file')
+    disc_parser.add_argument('--append', action='store_true', help='Append to output file')
+    disc_parser.add_argument('--max-videos', type=int, help='Max videos per source')
+    disc_parser.set_defaults(func=cmd_discover)
+
+    args = parser.parse_args()
+
+    if not args.command:
         parser.print_help()
-        if args.urls_file:
-            print("\nNote: --urls-file was provided but no usable URLs were found (blank/comment-only file).")
+        sys.exit(0)
+
+    # Run the appropriate subcommand
+    sys.exit(args.func(args))
+
+
+if __name__ == '__main__':
+    main()
