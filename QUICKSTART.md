@@ -82,38 +82,34 @@ uv run python scripts/init_db.py
 
 ## Basic Usage
 
-### Option 1: Discover and Process Videos (Recommended)
+### Option 1: Start with Known Users (Recommended)
 
 ```bash
-# 1. Find videos from hashtags
-uv run python scripts/discover.py --hashtag EDS --hashtag POTS --max-videos 100 --output urls.txt
+# 1. Get all videos from a specific user
+uv run python scripts/discover.py --user chronicillnesswarrior
 
-# 2. Expand to get all videos from discovered users
-uv run python scripts/discover.py --expand-users urls.txt --append
+# 2. Or get only recent videos (last 6 months)
+uv run python scripts/discover.py --user chronicillnesswarrior --days 180
 
-# 3. Run the full pipeline
+# 3. Run the pipeline on discovered URLs
+uv run python pipeline.py run --urls-file urls.txt --tags EDS MCAS POTS
+```
+
+### Option 2: Expand Existing URL List
+
+```bash
+# 1. Start with some seed URLs in urls.txt
+# 2. Expand to get ALL videos from those users (last year)
+uv run python scripts/discover.py --expand-users urls.txt --days 365
+
+# 3. Process everything
 uv run python pipeline.py run --urls-file urls.txt --tags EDS POTS
 ```
 
-### Option 2: Process a Single Video
+### Option 3: Process a Single Video
 
 ```bash
 uv run python pipeline.py run "https://tiktok.com/@user/video/123" --tags EDS
-```
-
-### Option 3: Process from a URL File
-
-1. Create a file with URLs (one per line):
-
-```bash
-cp urls.txt.example urls.txt
-# Edit urls.txt and add your video URLs
-```
-
-2. Run the pipeline:
-
-```bash
-uv run python pipeline.py run --urls-file urls.txt --tags EDS MCAS POTS
 ```
 
 ## Discovery Commands
@@ -127,15 +123,17 @@ uv run python scripts/discover.py --url "https://tiktok.com/@user/video/123"
 # From a username directly
 uv run python scripts/discover.py --user chronicallychillandhot
 
-# From hashtags
-uv run python scripts/discover.py --hashtag ehlersdanlos --hashtag chronicillness
-
-# From keyword search
-uv run python scripts/discover.py --search "ehlers danlos syndrome"
-
 # Expand all users in existing file
-uv run python scripts/discover.py --expand-users urls.txt --append
+uv run python scripts/discover.py --expand-users urls.txt
+
+# With date filtering (last 6 months)
+uv run python scripts/discover.py --user someuser --days 180
+
+# With date range (all of 2024)
+uv run python scripts/discover.py --user someuser --after 2024-01-01 --before 2025-01-01
 ```
+
+**Note**: Hashtag discovery (`--hashtag`) is often blocked by TikTok. User profile discovery is more reliable.
 
 ## Pipeline Commands
 
@@ -179,6 +177,30 @@ uv run python pipeline.py extract --all
 uv run python pipeline.py analyze
 ```
 
+## Discovery Tips
+
+### Date Filtering
+
+Limit discovery to specific time periods:
+
+```bash
+# Last 30 days
+uv run python scripts/discover.py --user someone --days 30
+
+# Last year
+uv run python scripts/discover.py --expand-users urls.txt --days 365
+
+# Specific date range
+uv run python scripts/discover.py --user someone --after 2024-01-01 --before 2024-07-01
+```
+
+### Crash Safety
+
+- URLs are saved incrementally after each user
+- If discovery is interrupted, just run the command again
+- Default mode appends to existing file (won't lose data)
+- Duplicates are automatically skipped
+
 ## Configuration Tips
 
 ### For RTX 4090 (Recommended Settings)
@@ -211,7 +233,7 @@ The pipeline generates:
 - **Audio files**: `data/audio/*.mp3`
 - **Transcripts**: `data/transcripts/*.json`
 - **Visualizations**: `data/visualizations/*.png`
-- **CSV exports**: `data/visualizations/*.csv`
+- **CSV exports**: `data/exports/*.csv`
 - **Results**: `pipeline_results.json`, `analysis_results.json`
 
 ## Troubleshooting
@@ -235,7 +257,8 @@ The pipeline generates:
 ### TikTok discovery errors
 
 - Install Playwright browsers: `uv run playwright install`
-- If getting 403 errors, increase delays or try later
+- Hashtag/search discovery is often blocked - use `--user` or `--expand-users` instead
+- If getting timeouts, increase delays: `--min-delay 5 --max-delay 10`
 
 ### API rate limits
 
@@ -246,7 +269,7 @@ If you hit Claude API rate limits:
 
 ## Next Steps
 
-1. **Discover videos**: Use hashtag and user discovery to build your dataset
+1. **Discover videos**: Use user discovery to build your dataset
 2. **Run the pipeline**: Process videos and extract symptoms
 3. **Analyze patterns**: Use clustering to discover symptom patterns
 4. **Iterate**: Adjust confidence thresholds and clustering parameters

@@ -4,7 +4,7 @@ A research-grade pipeline to collect and analyze TikTok/YouTube videos about Ehl
 
 ## Features
 
-- **Video Discovery** - Find videos from user profiles, hashtags, and keyword searches
+- **Video Discovery** - Find ALL videos from user profiles with date filtering
 - **Video Download** - Download from TikTok, YouTube, and other platforms via yt-dlp
 - **GPU-Accelerated Transcription** - Whisper large-v3 on CUDA (optimized for RTX 4090)
 - **AI-Powered Extraction** - Extract symptoms, diagnoses, and treatments using Claude or Ollama
@@ -15,6 +15,7 @@ A research-grade pipeline to collect and analyze TikTok/YouTube videos about Ehl
 - **Resumable Runs** - Progress tracking allows interrupted runs to be resumed
 - **Duplicate Detection** - Prevents downloading the same video twice
 - **Granular Recovery** - Run individual pipeline stages to recover from failures
+- **Crash-Safe Discovery** - URLs saved incrementally to survive interruptions
 
 ## Requirements
 
@@ -79,35 +80,89 @@ createdb tiktok_disorders
 uv run python scripts/init_db.py
 ```
 
-## Usage
+## Video Discovery
 
-The pipeline uses subcommands for different operations:
+The discovery script finds TikTok videos and saves them to `urls.txt` for processing.
 
-### Discover New Videos
-
-Find videos from TikTok users, hashtags, and searches:
+### Basic Discovery
 
 ```bash
-# Get all videos from a user (from a video URL)
-uv run python scripts/discover.py --url "https://tiktok.com/@user/video/123"
-
-# Get all videos from a username directly
+# Get ALL videos from a specific user
 uv run python scripts/discover.py --user chronicallychillandhot
 
-# Expand all users from an existing URL file
-uv run python scripts/discover.py --expand-users urls.txt --append
+# Get videos from a video URL (extracts username automatically)
+uv run python scripts/discover.py --url "https://tiktok.com/@user/video/123"
 
-# Find videos by hashtag
-uv run python scripts/discover.py --hashtag EDS --hashtag POTS --max-videos 200
-
-# Search by keyword
-uv run python scripts/discover.py --search "ehlers danlos syndrome" --max-videos 100
-
-# Combine methods
-uv run python scripts/discover.py --hashtag chronicillness --search "hypermobility" --append
+# Expand ALL users from your existing URL file (gets complete profiles)
+uv run python scripts/discover.py --expand-users urls.txt
 ```
 
-### Run Full Pipeline
+### Date Filtering
+
+Limit discovery to videos from a specific time period:
+
+```bash
+# Only videos from the last 30 days
+uv run python scripts/discover.py --user someuser --days 30
+
+# Only videos from the last 6 months
+uv run python scripts/discover.py --expand-users urls.txt --days 180
+
+# Only videos from the last year
+uv run python scripts/discover.py --expand-users urls.txt --days 365
+
+# Only videos after a specific date (YYYY-MM-DD or YYYYMMDD)
+uv run python scripts/discover.py --user someuser --after 2024-01-01
+
+# Only videos before a specific date
+uv run python scripts/discover.py --user someuser --before 2025-01-01
+
+# Date range (e.g., all of 2024)
+uv run python scripts/discover.py --user someuser --after 2024-01-01 --before 2025-01-01
+```
+
+### Output Options
+
+```bash
+# Default: appends to urls.txt (safe, won't lose existing URLs)
+uv run python scripts/discover.py --user someuser
+
+# Write to a different file
+uv run python scripts/discover.py --user someuser --output my_urls.txt
+
+# Overwrite instead of append (use with caution!)
+uv run python scripts/discover.py --user someuser --overwrite
+```
+
+### Discovery Options Reference
+
+| Option | Description |
+|--------|-------------|
+| `--user USERNAME` | Get all videos from a TikTok user |
+| `--url URL` | Extract username from URL and get all their videos |
+| `--expand-users FILE` | Get all videos from every user in the URL file |
+| `--hashtag TAG` | Search for videos with hashtag (limited by TikTok) |
+| `--search QUERY` | Search for videos by keyword (limited by TikTok) |
+| `--days N` | Only include videos from the last N days |
+| `--after DATE` | Only include videos after this date |
+| `--before DATE` | Only include videos before this date |
+| `--max-videos N` | Maximum videos per user (default: unlimited) |
+| `--output FILE` | Output file (default: urls.txt) |
+| `--overwrite` | Overwrite output file instead of appending |
+| `--min-delay SEC` | Minimum delay between requests (default: 2.0) |
+| `--max-delay SEC` | Maximum delay between requests (default: 5.0) |
+
+### Notes on Discovery
+
+- **Append is default**: New URLs are added to your existing file
+- **Crash-safe**: URLs are saved after each user, so interruptions don't lose progress
+- **Deduplication**: Duplicate URLs are automatically skipped
+- **User profiles work best**: Hashtag/search discovery is often blocked by TikTok
+- **Rate limiting**: Built-in delays prevent IP bans
+
+## Running the Pipeline
+
+### Full Pipeline
 
 Process videos through all stages (download, transcribe, extract):
 
@@ -187,24 +242,26 @@ Reports are saved to `data/reports/` and CSV exports to `data/exports/`.
 | `pipeline.py extract` | Extract symptoms only |
 | `pipeline.py analyze` | Run clustering and visualization |
 | `pipeline.py stats` | Show database statistics |
-| `pipeline.py discover` | Find new TikTok videos |
-| `scripts/discover.py` | Standalone discovery script |
+| `scripts/discover.py` | Find TikTok videos from users/hashtags |
 | `scripts/init_db.py` | Initialize database schema |
 
 ## Example Workflows
 
-### Initial Dataset Collection
+### Complete Research Workflow
 
 ```bash
-# 1. Find videos about EDS from popular hashtags
-uv run python scripts/discover.py --hashtag ehlersdanlos --max-videos 500 --output urls.txt
-uv run python scripts/discover.py --hashtag hypermobility --max-videos 200 --append
+# 1. Start with a few seed videos you found manually
+# Add them to urls.txt
 
-# 2. Expand to get complete profiles for all discovered users
-uv run python scripts/discover.py --expand-users urls.txt --append
+# 2. Expand to get ALL videos from those users (last year only)
+uv run python scripts/discover.py --expand-users urls.txt --days 365
 
-# 3. Process everything
-uv run python pipeline.py run --urls-file urls.txt --tags EDS
+# 3. Process everything through the pipeline
+uv run python pipeline.py run --urls-file urls.txt --tags EDS MCAS POTS
+
+# 4. Analyze the results
+uv run python pipeline.py analyze
+uv run python reports.py --export-csv
 ```
 
 ### Recovery After Failure
@@ -223,23 +280,34 @@ uv run python pipeline.py extract --all
 uv run python pipeline.py analyze
 ```
 
-### Adding a New Condition to Study
+### Adding a New User to Study
 
 ```bash
-# Search for MCAS content
-uv run python scripts/discover.py --hashtag MCAS --hashtag mastcellactivation --max-videos 300 --output mcas_urls.txt
+# Get all their videos from the last 6 months
+uv run python scripts/discover.py --user newusername --days 180
 
-# Process new videos
-uv run python pipeline.py run --urls-file mcas_urls.txt --tags MCAS
+# Process the new URLs
+uv run python pipeline.py run --urls-file urls.txt --tags EDS
+```
+
+### Studying Recent Content Only
+
+```bash
+# Get only videos from the last 30 days for all your users
+uv run python scripts/discover.py --expand-users urls.txt --days 30 --output recent_urls.txt --overwrite
+
+# Process just the recent content
+uv run python pipeline.py run --urls-file recent_urls.txt
 ```
 
 ## Research Hashtags
 
-Suggested hashtags for chronic illness research:
+Suggested hashtags for chronic illness research (note: hashtag discovery may be limited by TikTok):
 
 - **EDS**: `#ehlersdanlos`, `#EDS`, `#hypermobility`, `#zebra`
 - **POTS**: `#POTS`, `#dysautonomia`, `#posturaltachycardia`
 - **MCAS**: `#MCAS`, `#mastcellactivation`, `#histamineintolerance`
+- **CIRS**: `#CIRS`, `#moldillness`, `#biotoxin`
 - **General**: `#chronicillness`, `#spoonie`, `#invisibleillness`, `#chronicpain`
 
 ## Pipeline Stages
@@ -258,7 +326,7 @@ For each video, the pipeline:
 ## Database Schema
 
 ### Core Tables
-- `videos` - Video metadata, engagement metrics
+- `videos` - Video metadata, engagement metrics, author info
 - `transcripts` - Transcribed text with model provenance
 - `symptoms` - Extracted symptoms with severity, temporal patterns
 - `claimed_diagnoses` - Conditions the speaker claims to have
@@ -307,10 +375,30 @@ The pipeline generates:
 - **Database Records** - All extracted data with full provenance
 - **Audio Files** - MP3 files in `data/audio/`
 - **Transcripts** - JSON files in `data/transcripts/`
-- **Visualizations** - Cluster plots in `data/analysis/`
-- **CSV Exports** - Symptom data for external analysis
+- **Visualizations** - Cluster plots in `data/visualizations/`
+- **CSV Exports** - Symptom data for external analysis in `data/exports/`
 
 ## Example Output
+
+```
+============================================================
+TikTok Video Discovery
+============================================================
+Output: urls.txt (append mode)
+Date filter: after 20240101
+URLs are saved incrementally after each source (crash-safe)
+
+[1/85] @chronicallychillandhot
+  Fetching videos for @chronicallychillandhot after 20240101 (via yt-dlp)...
+  Found 127 videos for @chronicallychillandhot
+    -> Saved 127 new URLs to urls.txt
+
+[2/85] @ehlers_danlos_life
+  Fetching videos for @ehlers_danlos_life after 20240101 (via yt-dlp)...
+  Found 89 videos for @ehlers_danlos_life
+    -> Saved 89 new URLs to urls.txt
+...
+```
 
 ```
 # PIPELINE COMPLETE (Run ID: 5)
@@ -344,10 +432,19 @@ uv sync --group cuda
 ```
 
 ### TikTok Discovery Issues
-If discovery fails with 403 errors:
+
+**Hashtag/search discovery returns 0 videos:**
+- This is normal - TikTok blocks automated hashtag scraping
+- Use `--user` or `--expand-users` instead (these work reliably)
+
+**403 errors or timeouts:**
 1. Install Playwright browsers: `uv run playwright install`
 2. Increase delays: `--min-delay 5 --max-delay 10`
 3. Try again later (TikTok rate limits)
+
+**Discovery interrupted:**
+- Don't worry! URLs are saved after each user
+- Just run the command again - it will skip already-saved URLs
 
 ### TikTok Impersonation Warning
 The warning about impersonation is normal - curl_cffi is included to handle this.
@@ -360,19 +457,21 @@ When using `--urls-file`, the file supports:
 # Full-line comments start with # or //
 // This is also a comment
 
+# @username - 2024-01-20 15:30:00
 https://www.tiktok.com/@user1/video/123
-https://www.tiktok.com/@user2/video/456  # inline comments work too
-https://youtube.com/watch?v=abc  // this style too
+https://www.tiktok.com/@user1/video/456
+
+# @another_user - 2024-01-20 15:31:00
+https://www.tiktok.com/@user2/video/789
 
 # Blank lines are ignored
-https://www.tiktok.com/@user3/video/789
 ```
 
 - One URL per line
 - Comments with `#` or `//` (full-line or inline)
 - Blank lines ignored
 - Whitespace trimmed
-- Duplicates automatically removed
+- Duplicates automatically removed by pipeline
 
 ## License
 

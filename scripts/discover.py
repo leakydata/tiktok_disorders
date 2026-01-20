@@ -190,17 +190,28 @@ def discover_user_videos_tiktokapipy(username: str, max_videos: Optional[int] = 
 
 
 def discover_user_videos(username: str, max_videos: Optional[int] = None,
-                         delay_range: tuple = (2, 5)) -> List[str]:
+                         delay_range: tuple = (2, 5),
+                         date_after: Optional[str] = None,
+                         date_before: Optional[str] = None) -> List[str]:
     """
     Discover all video URLs from a TikTok user's profile.
     
     Tries yt-dlp first (more reliable), falls back to tiktokapipy.
-    """
-    # Try yt-dlp first as it's more reliable
-    urls = discover_user_videos_ytdlp(username, max_videos)
     
-    # If yt-dlp failed, try tiktokapipy
+    Args:
+        username: TikTok username
+        max_videos: Maximum number of videos to fetch
+        delay_range: Random delay range between requests
+        date_after: Only include videos after this date (YYYYMMDD)
+        date_before: Only include videos before this date (YYYYMMDD)
+    """
+    # Try yt-dlp first as it's more reliable (and supports date filtering)
+    urls = discover_user_videos_ytdlp(username, max_videos, date_after, date_before)
+    
+    # If yt-dlp failed, try tiktokapipy (no date filtering available)
     if not urls:
+        if date_after or date_before:
+            print("    Note: tiktokapipy fallback doesn't support date filtering")
         urls = discover_user_videos_tiktokapipy(username, max_videos, delay_range)
     
     return urls
@@ -300,19 +311,155 @@ def discover_hashtag_videos_tiktokapipy(hashtag: str, max_videos: int = 100,
     return urls
 
 
+def discover_hashtag_videos_playwright(hashtag: str, max_videos: int = 100,
+                                        scroll_pause: float = 2.0,
+                                        headless: bool = False) -> List[str]:
+    """
+    Discover video URLs from a TikTok hashtag page using Playwright directly.
+    
+    Uses a real browser with human-like scrolling behavior to avoid detection.
+    
+    Args:
+        hashtag: TikTok hashtag (without #)
+        max_videos: Maximum number of videos to collect
+        scroll_pause: Pause between scrolls (seconds)
+        headless: Run browser in headless mode (visible browser is harder to detect)
+    """
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        print("  Playwright not available. Run: uv run playwright install")
+        return []
+    
+    hashtag = hashtag.lstrip('#').lower()
+    urls = set()
+    
+    print(f"  Fetching videos for #{hashtag} (via Playwright browser)...")
+    print(f"  Browser will open - please don't interact with it.")
+    
+    tag_url = f"https://www.tiktok.com/tag/{hashtag}"
+    
+    try:
+        with sync_playwright() as p:
+            # Launch visible browser (harder to detect as bot)
+            browser = p.chromium.launch(
+                headless=headless,
+                args=[
+                    '--disable-blink-features=AutomationControlled',
+                    '--no-sandbox',
+                ]
+            )
+            
+            # Create context with realistic viewport and user agent
+            context = browser.new_context(
+                viewport={'width': 1920, 'height': 1080},
+                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            )
+            
+            page = context.new_page()
+            
+            # Navigate to hashtag page
+            page.goto(tag_url, wait_until='networkidle', timeout=30000)
+            
+            # Wait for content to load
+            time.sleep(3)
+            
+            # Check if we hit an actual visible captcha
+            captcha_visible = page.query_selector('div[class*="captcha"]') or \
+                              page.query_selector('div[class*="Captcha"]') or \
+                              page.query_selector('iframe[src*="captcha"]')
+            
+            if captcha_visible:
+                print("  TikTok is showing a captcha. Please solve it manually in the browser.")
+                print("  Waiting 30 seconds for you to solve it...")
+                time.sleep(30)
+            
+            # Check if page loaded but no content (might be blocked)
+            no_content = page.query_selector('div[class*="empty"]') or \
+                         page.query_selector('div[class*="no-content"]')
+            if no_content and not page.query_selector('a[href*="/video/"]'):
+                print("  Page appears empty - TikTok may be blocking. Continuing anyway...")
+            
+            
+            # Scroll and collect video links
+            last_height = 0
+            scroll_attempts = 0
+            max_scroll_attempts = 50  # Prevent infinite scrolling
+            
+            while len(urls) < max_videos and scroll_attempts < max_scroll_attempts:
+                # Extract video links from current page
+                links = page.query_selector_all('a[href*="/video/"]')
+                
+                for link in links:
+                    href = link.get_attribute('href')
+                    if href and '/video/' in href:
+                        # Normalize URL
+                        if href.startswith('/'):
+                            href = f"https://www.tiktok.com{href}"
+                        if 'tiktok.com' in href and '/video/' in href:
+                            urls.add(href)
+                
+                print(f"    Found {len(urls)} videos so far...", end='\r')
+                
+                if len(urls) >= max_videos:
+                    break
+                
+                # Scroll down with human-like behavior
+                page.evaluate('window.scrollBy(0, window.innerHeight * 0.8)')
+                
+                # Random pause (human-like)
+                time.sleep(scroll_pause + random.uniform(0.5, 1.5))
+                
+                # Check if we've reached the bottom
+                new_height = page.evaluate('document.body.scrollHeight')
+                if new_height == last_height:
+                    scroll_attempts += 1
+                    if scroll_attempts >= 3:
+                        print(f"\n  Reached end of page after {len(urls)} videos")
+                        break
+                else:
+                    scroll_attempts = 0
+                    last_height = new_height
+            
+            browser.close()
+            
+        print(f"\n  Found {len(urls)} videos for #{hashtag}")
+        
+    except Exception as e:
+        error_msg = str(e)
+        if 'Timeout' in error_msg:
+            print(f"  Page load timeout - TikTok may be slow or blocking")
+        else:
+            print(f"  Error fetching #{hashtag}: {e}")
+    
+    return list(urls)[:max_videos]
+
+
 def discover_hashtag_videos(hashtag: str, max_videos: int = 100,
-                            delay_range: tuple = (2, 5)) -> List[str]:
+                            delay_range: tuple = (2, 5),
+                            use_browser: bool = False) -> List[str]:
     """
     Discover video URLs from a TikTok hashtag page.
     
-    Tries yt-dlp first, falls back to tiktokapipy.
+    Tries multiple methods:
+    1. If use_browser=True, uses Playwright with visible browser (most reliable)
+    2. yt-dlp (fast but often blocked)
+    3. tiktokapipy (fallback)
     """
+    # If browser mode requested, use Playwright directly
+    if use_browser:
+        return discover_hashtag_videos_playwright(hashtag, max_videos)
+    
     # Try yt-dlp first
     urls = discover_hashtag_videos_ytdlp(hashtag, max_videos)
     
     # If yt-dlp failed, try tiktokapipy
     if not urls:
         urls = discover_hashtag_videos_tiktokapipy(hashtag, max_videos, delay_range)
+    
+    # If all else failed, suggest browser mode
+    if not urls:
+        print(f"  Tip: Try --browser flag for better hashtag discovery")
     
     return urls
 
@@ -507,6 +654,10 @@ Examples:
                         help='Maximum delay between requests in seconds (default: 5.0)')
     parser.add_argument('--skip-db-check', action='store_true',
                         help='Skip checking database for existing videos')
+    parser.add_argument('--browser', action='store_true',
+                        help='Use visible browser for hashtag discovery (slower but more reliable)')
+    parser.add_argument('--headless', action='store_true',
+                        help='Run browser in headless mode (use with --browser)')
 
     args = parser.parse_args()
 
@@ -530,11 +681,28 @@ Examples:
     existing_urls = load_existing_urls(output_path) if append_mode else set()
     total_new_urls = 0
     total_found = 0
+    
+    # Handle date filtering
+    date_after = args.date_after
+    date_before = args.date_before
+    
+    # --days is a shortcut for --after (last N days)
+    if args.days:
+        from datetime import datetime, timedelta
+        cutoff = datetime.now() - timedelta(days=args.days)
+        date_after = cutoff.strftime('%Y%m%d')
 
     print("=" * 60)
     print("TikTok Video Discovery")
     print("=" * 60)
     print(f"Output: {output_path} ({'append' if append_mode else 'overwrite'} mode)")
+    if date_after or date_before:
+        date_range = []
+        if date_after:
+            date_range.append(f"after {date_after}")
+        if date_before:
+            date_range.append(f"before {date_before}")
+        print(f"Date filter: {' and '.join(date_range)}")
     print("URLs are saved incrementally after each source (crash-safe)")
 
     # Initialize file if not appending
@@ -549,7 +717,8 @@ Examples:
         for url in args.urls:
             username = extract_username_from_url(url)
             if username:
-                urls = discover_user_videos(username, args.max_videos, delay_range)
+                urls = discover_user_videos(username, args.max_videos, delay_range,
+                                           date_after, date_before)
                 total_found += len(urls)
                 if urls:
                     count, existing_urls = append_urls_incrementally(
@@ -563,7 +732,8 @@ Examples:
     if args.users:
         print(f"\nProcessing {len(args.users)} username(s)...")
         for username in args.users:
-            urls = discover_user_videos(username, args.max_videos, delay_range)
+            urls = discover_user_videos(username, args.max_videos, delay_range,
+                                       date_after, date_before)
             total_found += len(urls)
             if urls:
                 count, existing_urls = append_urls_incrementally(
@@ -583,7 +753,8 @@ Examples:
 
         for i, username in enumerate(sorted(users), 1):
             print(f"\n[{i}/{len(users)}] @{username}")
-            urls = discover_user_videos(username, args.max_videos, delay_range)
+            urls = discover_user_videos(username, args.max_videos, delay_range,
+                                       date_after, date_before)
             total_found += len(urls)
             if urls:
                 count, existing_urls = append_urls_incrementally(
@@ -597,10 +768,21 @@ Examples:
 
     # Process hashtags
     if args.hashtags:
-        print(f"\nProcessing {len(args.hashtags)} hashtag(s)...")
+        if args.browser:
+            print(f"\nProcessing {len(args.hashtags)} hashtag(s) using browser...")
+            print("  A browser window will open. Please don't interact with it.")
+        else:
+            print(f"\nProcessing {len(args.hashtags)} hashtag(s)...")
         max_vids = args.max_videos or 100
         for hashtag in args.hashtags:
-            urls = discover_hashtag_videos(hashtag, max_vids, delay_range)
+            if args.browser:
+                urls = discover_hashtag_videos_playwright(
+                    hashtag, max_vids, 
+                    scroll_pause=2.0,
+                    headless=args.headless
+                )
+            else:
+                urls = discover_hashtag_videos(hashtag, max_vids, delay_range)
             total_found += len(urls)
             if urls:
                 count, existing_urls = append_urls_incrementally(
