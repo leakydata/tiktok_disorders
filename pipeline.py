@@ -310,12 +310,56 @@ class ResearchPipeline:
 
 
 if __name__ == '__main__':
-    # Example: Run pipeline on a sample URL
     import sys
     import argparse
 
+    def read_urls_file(path: str) -> List[str]:
+        """
+        Read a text file containing one URL per line.
+        - Ignores blank lines
+        - Supports comments starting with # or //
+        - Trims whitespace
+        """
+        p = Path(path)
+        if not p.exists():
+            raise FileNotFoundError(f"URLs file not found: {p}")
+
+        urls_out: List[str] = []
+        for raw in p.read_text(encoding='utf-8').splitlines():
+            line = raw.strip()
+            if not line:
+                continue
+            if line.startswith('#') or line.startswith('//'):
+                continue
+            # Allow inline comments: "<url> # comment" or "<url> // comment"
+            if ' #' in line:
+                line = line.split(' #', 1)[0].strip()
+            if ' //' in line:
+                line = line.split(' //', 1)[0].strip()
+            if line:
+                urls_out.append(line)
+
+        return urls_out
+
+    def merge_and_dedupe_urls(cli_urls: List[str], file_urls: List[str]) -> List[str]:
+        """
+        Keep first-seen order while removing duplicates.
+        """
+        seen = set()
+        merged: List[str] = []
+        for u in (file_urls + cli_urls):
+            u2 = (u or "").strip()
+            if not u2:
+                continue
+            if u2 in seen:
+                continue
+            seen.add(u2)
+            merged.append(u2)
+        return merged
+
     parser = argparse.ArgumentParser(description='EDS/MCAS/POTS Research Pipeline')
     parser.add_argument('urls', nargs='*', help='Video URLs to process')
+    parser.add_argument('--urls-file', default=None, help='Path to text file with one URL per line')
     parser.add_argument('--analyze', action='store_true', help='Run analysis on collected data')
     parser.add_argument('--resume', type=int, help='Resume a previous run by ID')
     parser.add_argument('--status', action='store_true', help='Show status of the latest run')
@@ -336,8 +380,8 @@ if __name__ == '__main__':
         extractor_model=args.model
     )
 
+    # --- status / stats / analyze / resume are mutually exclusive-ish with processing ---
     if args.status:
-        # Show status of latest run
         run_id = args.resume or get_latest_run_id()
         if run_id:
             progress = get_run_progress_summary(run_id)
@@ -353,9 +397,9 @@ if __name__ == '__main__':
             print('='*60)
         else:
             print("No processing runs found")
+        sys.exit(0)
 
-    elif args.stats:
-        # Show database statistics
+    if args.stats:
         stats = get_symptom_statistics()
         print(f"\n{'='*60}")
         print("Database Statistics:")
@@ -374,7 +418,6 @@ if __name__ == '__main__':
             for c in stats['concordance_by_condition']:
                 print(f"  {c['condition_code']}: {c['avg_concordance']:.2f} avg ({c['sample_size']} samples)")
 
-        # Treatment stats
         treatment_stats = get_treatment_statistics()
         if treatment_stats['top_treatments']:
             print(f"\nTop Treatments:")
@@ -382,7 +425,6 @@ if __name__ == '__main__':
                 eff = f" (eff: {t['avg_effectiveness']:.2f})" if t['avg_effectiveness'] else ""
                 print(f"  {t['treatment_name']} ({t['treatment_type']}): {t['mention_count']} mentions{eff}")
 
-        # Comorbidity
         comorbidity = get_comorbidity_matrix()
         if comorbidity:
             print(f"\nComorbidity Pairs:")
@@ -390,21 +432,29 @@ if __name__ == '__main__':
                 print(f"  {c['condition_a']} + {c['condition_b']}: {c['video_count']} videos")
 
         print('='*60)
+        sys.exit(0)
 
-    elif args.analyze:
-        # Just run analysis
+    if args.analyze:
         results = pipeline.analyze_all()
         print(json.dumps(results, indent=2, default=str))
+        sys.exit(0)
 
-    elif args.resume:
-        # Resume a previous run
+    if args.resume:
         results = pipeline.process_batch([], tags=args.tags, resume_run_id=args.resume)
         print("\n" + json.dumps(results, indent=2, default=str))
+        sys.exit(0)
 
-    elif args.urls:
-        # Process URLs
-        results = pipeline.process_batch(args.urls, tags=args.tags)
+    # --- processing mode: from file and/or CLI args ---
+    file_urls: List[str] = []
+    if args.urls_file:
+        file_urls = read_urls_file(args.urls_file)
+
+    merged_urls = merge_and_dedupe_urls(args.urls, file_urls)
+
+    if merged_urls:
+        results = pipeline.process_batch(merged_urls, tags=args.tags)
         print("\n" + json.dumps(results, indent=2, default=str))
-
     else:
         parser.print_help()
+        if args.urls_file:
+            print("\nNote: --urls-file was provided but no usable URLs were found (blank/comment-only file).")
