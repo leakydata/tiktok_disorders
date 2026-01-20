@@ -115,6 +115,24 @@ python pipeline.py --resume <run_id>
 python pipeline.py --analyze
 ```
 
+### Generate Reports
+
+```bash
+# Full analysis report (JSON + summary)
+python reports.py
+
+# Export all data to CSV for Excel/R/Python
+python reports.py --export-csv
+
+# Individual reports
+python reports.py --diagnoses    # Diagnosis breakdown with concordance
+python reports.py --symptoms     # Symptom analysis by category/severity
+python reports.py --treatments   # Treatment effectiveness analysis
+python reports.py --creators     # Analysis by video creator
+```
+
+Reports are saved to `data/reports/` and CSV exports to `data/exports/`.
+
 ## Pipeline Stages
 
 For each video, the pipeline:
