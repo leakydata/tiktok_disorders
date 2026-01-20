@@ -1,43 +1,67 @@
 # EDS/MCAS/POTS Research Pipeline
 
-A proof-of-concept research pipeline to collect and analyze videos about Ehlers-Danlos Syndrome (EDS), Mast Cell Activation Syndrome (MCAS), and Postural Orthostatic Tachycardia Syndrome (POTS).
+A research-grade pipeline to collect and analyze TikTok/YouTube videos about Ehlers-Danlos Syndrome (EDS), Mast Cell Activation Syndrome (MCAS), and Postural Orthostatic Tachycardia Syndrome (POTS).
 
-## Project Overview
+## Features
 
-This pipeline enables researchers to:
-- Download videos from various platforms (YouTube, TikTok, etc.)
-- Extract and transcribe audio content
-- Use AI to identify and categorize symptoms
-- Perform cluster analysis to discover patterns
-- Generate visualizations and export data
+- **Video Download** - Download from TikTok, YouTube, and other platforms via yt-dlp
+- **GPU-Accelerated Transcription** - Whisper large-v3 on CUDA (optimized for RTX 4090)
+- **AI-Powered Extraction** - Extract symptoms, diagnoses, and treatments using Claude or Ollama
+- **Diagnosis Concordance** - Compare reported symptoms against expected symptoms for claimed conditions
+- **Comorbidity Tracking** - Track which conditions appear together
+- **Treatment Analysis** - Track medications, supplements, therapies with effectiveness ratings
+- **Cluster Analysis** - K-means/DBSCAN clustering with silhouette validation
+- **Resumable Runs** - Progress tracking allows interrupted runs to be resumed
+- **Duplicate Detection** - Prevents downloading the same video twice
 
-## Architecture
+## Requirements
 
-The project consists of seven main modules:
-
-1. **database.py** - PostgreSQL database management for storing video metadata, audio files, transcripts, and symptoms
-2. **downloader.py** - Video/audio download using yt-dlp
-3. **transcriber.py** - Audio-to-text transcription using OpenAI Whisper
-4. **extractor.py** - Symptom extraction using Claude API
-5. **analyzer.py** - K-means clustering and visualization with scikit-learn
-6. **pipeline.py** - Complete workflow orchestration
-7. **scripts/** - Command-line interfaces for each stage
+- Python 3.9+
+- PostgreSQL
+- FFmpeg (required for audio extraction)
+- CUDA-capable GPU (optional, for fast transcription)
 
 ## Installation
 
 ```bash
-# Install dependencies with uv (recommended)
+# Install dependencies with uv
 uv sync
 
-# Or with pip
-pip install -r requirements.txt
+# For GPU acceleration (RTX 4090, CUDA 12.1)
+uv sync --group cuda
 
-# Optional: install OpenAI Whisper backend (requires Python < 3.10)
-# uv sync --extra openai-whisper
+# Optional: UMAP for dimensionality reduction
+uv sync --extra umap
 
-# Set up environment variables
+# Set up environment
 cp .env.example .env
-# Edit .env with your database credentials and API keys
+# Edit .env with your credentials
+```
+
+### FFmpeg Installation
+
+FFmpeg is required for extracting audio from videos:
+
+**Windows:**
+```bash
+# Using winget
+winget install ffmpeg
+
+# Or using chocolatey
+choco install ffmpeg
+
+# Or download from https://ffmpeg.org/download.html
+# Add to PATH
+```
+
+**Linux:**
+```bash
+sudo apt install ffmpeg
+```
+
+**macOS:**
+```bash
+brew install ffmpeg
 ```
 
 ## Database Setup
@@ -46,91 +70,151 @@ cp .env.example .env
 # Create PostgreSQL database
 createdb tiktok_disorders
 
-# Initialize schema
-uv run python -c "from database import init_db; init_db()"
+# Initialize schema (creates all tables)
+python database.py
 ```
 
 ## Usage
 
-### Download videos
+### Process Videos
+
 ```bash
-uv run python scripts/download.py --url "https://youtube.com/watch?v=..." --tags "EDS,POTS"
+# Process a single video
+python pipeline.py "https://www.tiktok.com/@user/video/123"
+
+# Process multiple videos
+python pipeline.py "url1" "url2" "url3"
+
+# Process from a file (one URL per line)
+python pipeline.py --urls-file urls.txt
+
+# Use Ollama instead of Claude for extraction
+python pipeline.py --provider ollama --model llama3 "url"
 ```
 
-### Transcribe audio
+### Check Status and Statistics
+
 ```bash
-uv run python scripts/transcribe.py --video-id <id> --model base
+# Show database statistics
+python pipeline.py --stats
+
+# Show status of latest run
+python pipeline.py --status
+
+# Resume an interrupted run
+python pipeline.py --resume <run_id>
 ```
 
-### Extract symptoms
+### Run Analysis
+
 ```bash
-uv run python scripts/extract_symptoms.py --video-id <id>
+# Cluster analysis on collected data
+python pipeline.py --analyze
 ```
 
-### Analyze patterns
-```bash
-uv run python scripts/analyze.py --min-videos 10
-```
+## Pipeline Stages
 
-### Run complete pipeline
-```bash
-uv run python scripts/run_pipeline.py --urls urls.txt
-```
+For each video, the pipeline:
 
-### Backfill database from existing transcripts
-```bash
-uv run python scripts/backfill_transcripts.py --dir data/transcripts
-# Optionally extract symptoms after backfill
-uv run python scripts/backfill_transcripts.py --dir data/transcripts --extract --provider ollama --model gpt-oss:20b
-```
+1. **Download** - Extract audio from video (with duplicate detection)
+2. **Transcribe** - Convert audio to text using Whisper (GPU-accelerated)
+3. **Quality Assessment** - Score transcript clarity, completeness, medical term density
+4. **Extract Symptoms** - Identify symptoms with severity, temporal patterns, triggers
+5. **Extract Diagnoses** - Identify claimed conditions (EDS, MCAS, POTS, etc.)
+6. **Extract Treatments** - Identify medications, supplements, therapies
+7. **Concordance Analysis** - Compare reported symptoms vs expected symptoms
+8. **Comorbidity Tracking** - Track condition co-occurrence
 
-### Use Ollama for extraction (local testing)
-```bash
-# Option 1: via .env (recommended)
-# EXTRACTOR_PROVIDER=ollama
-# OLLAMA_MODEL=gpt-oss:20b
+## Database Schema
 
-# Option 2: per-run flags
-uv run python scripts/run_pipeline.py --urls urls.txt --provider ollama --model gpt-oss:20b
-```
+### Core Tables
+- `videos` - Video metadata, engagement metrics
+- `transcripts` - Transcribed text with model provenance
+- `symptoms` - Extracted symptoms with severity, temporal patterns
+- `claimed_diagnoses` - Conditions the speaker claims to have
+- `treatments` - Medications, supplements, therapies mentioned
+
+### Analysis Tables
+- `expected_symptoms` - Medical reference data for each condition
+- `symptom_concordance` - How well reported symptoms match expected
+- `comorbidity_pairs` - Which conditions appear together
+- `transcript_quality` - Quality metrics for each transcript
+
+### Progress Tables
+- `processing_runs` - Track batch processing runs
+- `pipeline_progress` - Per-URL progress for resumable runs
 
 ## Configuration
 
-Configuration is managed through environment variables in `.env`:
-- `DATABASE_URL` - PostgreSQL connection string
-- `ANTHROPIC_API_KEY` - Claude API key for symptom extraction
-- `EXTRACTOR_PROVIDER` - `anthropic` or `ollama` (default: `anthropic`)
-- `ANTHROPIC_MODEL` - Claude model name (default: `claude-opus-4-5-20251101`)
-- `OLLAMA_URL` - Ollama base URL (default: `http://localhost:11434`)
-- `OLLAMA_MODEL` - Ollama model name (default: `gpt-oss:20b`)
-- `AUDIO_DIR` - Directory for storing audio files (default: ./data/audio)
-- `TRANSCRIPT_DIR` - Directory for storing transcripts (default: ./data/transcripts)
-- `TRANSCRIBER_BACKEND` - `faster-whisper` or `openai-whisper` (default: `faster-whisper`)
-- `WHISPER_COMPUTE_TYPE` - Faster-Whisper compute type (default: `auto`)
+Environment variables in `.env`:
 
-To use the OpenAI Whisper backend, install the optional dependency and set:
-```
-TRANSCRIBER_BACKEND=openai-whisper
-```
+```bash
+# Database
+DATABASE_URL=postgresql://user:pass@localhost/tiktok_disorders
 
-Optional analysis dependencies:
-```
-uv sync --extra umap
+# Extraction (choose one)
+EXTRACTOR_PROVIDER=anthropic  # or 'ollama'
+ANTHROPIC_API_KEY=sk-...
+ANTHROPIC_MODEL=claude-sonnet-4-20250514
+
+# Or for local extraction
+OLLAMA_URL=http://localhost:11434
+OLLAMA_MODEL=llama3
+
+# Transcription
+WHISPER_MODEL=large-v3
+TRANSCRIBER_BACKEND=faster-whisper
+WHISPER_COMPUTE_TYPE=auto  # float16 for GPU, int8 for CPU
+
+# Extraction thresholds
+MIN_CONFIDENCE_SCORE=0.6
 ```
 
 ## Output
 
 The pipeline generates:
-- Database records with video metadata and extracted symptoms
-- MP3 audio files
-- Transcripts (text and JSON format)
-- Cluster visualizations (PNG)
-- Correlation plots
-- CSV exports with symptoms by category and confidence scores
 
-## Project Status
+- **Database Records** - All extracted data with full provenance
+- **Audio Files** - MP3 files in `data/audio/`
+- **Transcripts** - JSON files in `data/transcripts/`
+- **Visualizations** - Cluster plots in `data/analysis/`
+- **CSV Exports** - Symptom data for external analysis
 
-See [Issue #1](https://github.com/leakydata/tiktok_disorders/issues/1) for the complete implementation plan.
+## Example Output
+
+```
+# PIPELINE COMPLETE (Run ID: 5)
+################################################################################
+  Total time: 45.2 seconds (0.8 minutes)
+  Success rate: 3/3 (100.0%)
+  Videos downloaded: 3
+  Videos transcribed: 3
+  Total symptoms extracted: 24
+  Total diagnoses extracted: 5
+  Total treatments extracted: 8
+
+  To resume this run if interrupted: --resume 5
+################################################################################
+```
+
+## Troubleshooting
+
+### FFmpeg Errors
+If you see `unable to obtain file audio codec with ffprobe`:
+1. Ensure FFmpeg is installed: `ffmpeg -version`
+2. Ensure it's in your PATH
+3. Restart your terminal after installation
+
+### CUDA Not Available
+If transcription runs on CPU:
+```bash
+# Reinstall with CUDA support
+rm -rf .venv
+uv sync --group cuda
+```
+
+### TikTok Impersonation Warning
+The warning about impersonation is normal - curl_cffi is included to handle this.
 
 ## License
 

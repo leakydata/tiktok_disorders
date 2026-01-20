@@ -2,7 +2,10 @@
   "permissions": {
     "allow": [
       "Bash(uv run python:*)",
-      "Bash(uv run:*)"
+      "Bash(uv run:*)",
+      "Bash(ffmpeg:*)",
+      "Bash(ls:*)",
+      "Bash(dir /b \"c:\\\\Users\\\\schol\\\\Documents\\\\Python Projects\\\\tiktok_disorders\\\\*.py\")"
     ]
   }
 }
