@@ -95,6 +95,9 @@ uv run python scripts/discover.py --url "https://tiktok.com/@user/video/123"
 
 # Expand ALL users from your existing URL file (gets complete profiles)
 uv run python scripts/discover.py --expand-users urls.txt
+
+# Find videos by hashtag (opens browser window, don't interact with it)
+uv run python scripts/discover.py --hashtag EDS --hashtag POTS --max-videos 200
 ```
 
 ### Date Filtering
@@ -141,24 +144,27 @@ uv run python scripts/discover.py --user someuser --overwrite
 | `--user USERNAME` | Get all videos from a TikTok user |
 | `--url URL` | Extract username from URL and get all their videos |
 | `--expand-users FILE` | Get all videos from every user in the URL file |
-| `--hashtag TAG` | Search for videos with hashtag (limited by TikTok) |
-| `--search QUERY` | Search for videos by keyword (limited by TikTok) |
+| `--hashtag TAG` | Search for videos with hashtag (uses browser) |
+| `--search QUERY` | Search for videos by keyword |
 | `--days N` | Only include videos from the last N days |
 | `--after DATE` | Only include videos after this date |
 | `--before DATE` | Only include videos before this date |
 | `--max-videos N` | Maximum videos per user (default: unlimited) |
 | `--output FILE` | Output file (default: urls.txt) |
 | `--overwrite` | Overwrite output file instead of appending |
+| `--headless` | Run browser in headless mode (faster but may get blocked) |
+| `--no-browser` | Use API instead of browser for hashtags (often blocked) |
 | `--min-delay SEC` | Minimum delay between requests (default: 2.0) |
 | `--max-delay SEC` | Maximum delay between requests (default: 5.0) |
 
 ### Notes on Discovery
 
 - **Append is default**: New URLs are added to your existing file
-- **Crash-safe**: URLs are saved after each user, so interruptions don't lose progress
+- **Browser is default for hashtags**: Opens a real browser window that scrolls through hashtag pages
+- **Crash-safe**: URLs are saved after each user/hashtag, so interruptions don't lose progress
 - **Deduplication**: Duplicate URLs are automatically skipped
-- **User profiles work best**: Hashtag/search discovery is often blocked by TikTok
 - **Rate limiting**: Built-in delays prevent IP bans
+- **Don't interact**: When the browser opens, let it scroll on its own
 
 ## Running the Pipeline
 
@@ -250,10 +256,10 @@ Reports are saved to `data/reports/` and CSV exports to `data/exports/`.
 ### Complete Research Workflow
 
 ```bash
-# 1. Start with a few seed videos you found manually
-# Add them to urls.txt
+# 1. Find videos from hashtags (browser will open - don't interact)
+uv run python scripts/discover.py --hashtag ehlersdanlos --hashtag POTS --max-videos 500
 
-# 2. Expand to get ALL videos from those users (last year only)
+# 2. Expand to get ALL videos from discovered users (last year only)
 uv run python scripts/discover.py --expand-users urls.txt --days 365
 
 # 3. Process everything through the pipeline
@@ -433,9 +439,14 @@ uv sync --group cuda
 
 ### TikTok Discovery Issues
 
-**Hashtag/search discovery returns 0 videos:**
-- This is normal - TikTok blocks automated hashtag scraping
-- Use `--user` or `--expand-users` instead (these work reliably)
+**Browser window opens for hashtags:**
+- This is expected! The script uses a real browser to scroll through hashtag pages
+- Don't interact with the browser - let it scroll on its own
+- URLs are saved after each hashtag (crash-safe)
+
+**Captcha appears:**
+- If a captcha appears, solve it manually in the browser window
+- The script will wait 30 seconds then continue
 
 **403 errors or timeouts:**
 1. Install Playwright browsers: `uv run playwright install`
@@ -443,7 +454,7 @@ uv sync --group cuda
 3. Try again later (TikTok rate limits)
 
 **Discovery interrupted:**
-- Don't worry! URLs are saved after each user
+- Don't worry! URLs are saved after each user/hashtag
 - Just run the command again - it will skip already-saved URLs
 
 ### TikTok Impersonation Warning

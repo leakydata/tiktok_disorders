@@ -22,6 +22,8 @@ from typing import Optional, Dict, Any, List
 import json
 from datetime import datetime
 
+import re
+
 from config import (
     TRANSCRIPT_DIR,
     WHISPER_MODEL,
@@ -30,6 +32,20 @@ from config import (
     ensure_directories,
 )
 from database import insert_transcript, get_video_by_id, get_transcript, insert_transcript_quality
+
+
+def _get_author_dir(author: str) -> Path:
+    """Get or create a subdirectory for the author/username."""
+    if not author:
+        author = "_unknown"
+    # Sanitize author name for folder
+    safe_author = re.sub(r'[<>:"/\\|?*]', '_', author)
+    safe_author = safe_author.strip().strip('.')  # Remove trailing dots/spaces
+    if not safe_author:
+        safe_author = "_unknown"
+    author_dir = TRANSCRIPT_DIR / safe_author
+    author_dir.mkdir(parents=True, exist_ok=True)
+    return author_dir
 
 
 class AudioTranscriber:
@@ -181,9 +197,11 @@ class AudioTranscriber:
             detected_language = result['language']
             segments = result.get('segments', []) if save_segments else None
 
-        # Save to file
+        # Save to file in author subdirectory
+        author = video.get('author') or '_unknown'
+        author_dir = _get_author_dir(author)
         output_filename = f"transcript_{video_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-        output_path = TRANSCRIPT_DIR / output_filename
+        output_path = author_dir / output_filename
 
         transcript_data = {
             'video_id': video_id,

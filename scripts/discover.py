@@ -382,11 +382,10 @@ def discover_hashtag_videos_playwright(hashtag: str, max_videos: int = 100,
             
             
             # Scroll and collect video links
-            last_height = 0
-            scroll_attempts = 0
-            max_scroll_attempts = 50  # Prevent infinite scrolling
+            last_url_count = 0
+            no_new_videos_count = 0
             
-            while len(urls) < max_videos and scroll_attempts < max_scroll_attempts:
+            while len(urls) < max_videos:
                 # Extract video links from current page
                 links = page.query_selector_all('a[href*="/video/"]')
                 
@@ -404,22 +403,53 @@ def discover_hashtag_videos_playwright(hashtag: str, max_videos: int = 100,
                 if len(urls) >= max_videos:
                     break
                 
-                # Scroll down with human-like behavior
-                page.evaluate('window.scrollBy(0, window.innerHeight * 0.8)')
+                # Scroll down
+                page.evaluate('window.scrollTo(0, document.body.scrollHeight)')
                 
-                # Random pause (human-like)
-                time.sleep(scroll_pause + random.uniform(0.5, 1.5))
+                # Wait for loading spinner to appear and disappear
+                # TikTok uses various loading indicators
+                try:
+                    # Wait a moment for spinner to potentially appear
+                    time.sleep(0.5)
+                    
+                    # Check for common loading indicators and wait for them to disappear
+                    loading_selectors = [
+                        'div[class*="loading"]',
+                        'div[class*="Loading"]', 
+                        'div[class*="spinner"]',
+                        'div[class*="Spinner"]',
+                        'svg[class*="loading"]',
+                        'div[data-e2e="loading"]',
+                    ]
+                    
+                    for selector in loading_selectors:
+                        spinner = page.query_selector(selector)
+                        if spinner:
+                            # Wait for it to disappear (max 10 seconds)
+                            try:
+                                page.wait_for_selector(selector, state='hidden', timeout=10000)
+                            except:
+                                pass
+                            break
+                    
+                    # Additional wait for content to render
+                    time.sleep(scroll_pause + random.uniform(0.5, 1.0))
+                    
+                except Exception:
+                    # If waiting fails, just use a fixed delay
+                    time.sleep(scroll_pause + random.uniform(1.0, 2.0))
                 
-                # Check if we've reached the bottom
-                new_height = page.evaluate('document.body.scrollHeight')
-                if new_height == last_height:
-                    scroll_attempts += 1
-                    if scroll_attempts >= 3:
-                        print(f"\n  Reached end of page after {len(urls)} videos")
+                # Check if we got new videos (more reliable than checking page height)
+                if len(urls) == last_url_count:
+                    no_new_videos_count += 1
+                    if no_new_videos_count >= 5:
+                        print(f"\n  No new videos after 5 scroll attempts. Reached end at {len(urls)} videos.")
                         break
+                    # Try waiting longer for content to load
+                    time.sleep(3)
                 else:
-                    scroll_attempts = 0
-                    last_height = new_height
+                    no_new_videos_count = 0
+                    last_url_count = len(urls)
             
             browser.close()
             
@@ -654,10 +684,12 @@ Examples:
                         help='Maximum delay between requests in seconds (default: 5.0)')
     parser.add_argument('--skip-db-check', action='store_true',
                         help='Skip checking database for existing videos')
-    parser.add_argument('--browser', action='store_true',
-                        help='Use visible browser for hashtag discovery (slower but more reliable)')
+    parser.add_argument('--browser', action='store_true', default=True,
+                        help='Use visible browser for hashtag discovery (default: True)')
+    parser.add_argument('--no-browser', dest='browser', action='store_false',
+                        help='Use API-based hashtag discovery instead of browser (often blocked)')
     parser.add_argument('--headless', action='store_true',
-                        help='Run browser in headless mode (use with --browser)')
+                        help='Run browser in headless mode (faster but may get blocked)')
 
     args = parser.parse_args()
 

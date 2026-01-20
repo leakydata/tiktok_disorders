@@ -48,6 +48,19 @@ class VideoDownloader:
             filename = filename[:200]
         return filename
 
+    def _get_author_dir(self, author: str) -> Path:
+        """Get or create a subdirectory for the author/username."""
+        if not author:
+            author = "_unknown"
+        # Sanitize author name for folder
+        safe_author = re.sub(r'[<>:"/\\|?*]', '_', author)
+        safe_author = safe_author.strip().strip('.')  # Remove trailing dots/spaces
+        if not safe_author:
+            safe_author = "_unknown"
+        author_dir = self.audio_dir / safe_author
+        author_dir.mkdir(parents=True, exist_ok=True)
+        return author_dir
+
     def get_video_info(self, url: str) -> Dict[str, Any]:
         """
         Retrieve video metadata without downloading.
@@ -132,11 +145,15 @@ class VideoDownloader:
                 }
         video_id = info['video_id']
         platform = info['platform']
+        author = info.get('author') or '_unknown'
+
+        # Create author subdirectory for organization
+        author_dir = self._get_author_dir(author)
 
         # Create filename
         safe_title = self._sanitize_filename(info['title'] or video_id)
         output_filename = f"{platform}_{video_id}_{safe_title}.mp3"
-        output_path = self.audio_dir / output_filename
+        output_path = author_dir / output_filename
 
         # Configure yt-dlp options
         ydl_opts = {
@@ -146,7 +163,7 @@ class VideoDownloader:
                 'preferredcodec': 'mp3',
                 'preferredquality': '192',
             }],
-            'outtmpl': str(self.audio_dir / f"{platform}_{video_id}_{safe_title}.%(ext)s"),
+            'outtmpl': str(author_dir / f"{platform}_{video_id}_{safe_title}.%(ext)s"),
             'quiet': False,
             'no_warnings': False,
         }

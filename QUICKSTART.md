@@ -126,6 +126,9 @@ uv run python scripts/discover.py --user chronicallychillandhot
 # Expand all users in existing file
 uv run python scripts/discover.py --expand-users urls.txt
 
+# From hashtags (browser window will open - don't interact with it)
+uv run python scripts/discover.py --hashtag EDS --hashtag POTS --max-videos 200
+
 # With date filtering (last 6 months)
 uv run python scripts/discover.py --user someuser --days 180
 
@@ -133,7 +136,7 @@ uv run python scripts/discover.py --user someuser --days 180
 uv run python scripts/discover.py --user someuser --after 2024-01-01 --before 2025-01-01
 ```
 
-**Note**: Hashtag discovery (`--hashtag`) is often blocked by TikTok. User profile discovery is more reliable.
+**Note**: Hashtag discovery opens a browser window that scrolls through pages. Don't interact with it - let it run.
 
 ## Pipeline Commands
 
@@ -257,7 +260,8 @@ The pipeline generates:
 ### TikTok discovery errors
 
 - Install Playwright browsers: `uv run playwright install`
-- Hashtag/search discovery is often blocked - use `--user` or `--expand-users` instead
+- Hashtag discovery opens a browser window - don't interact with it
+- If a captcha appears, solve it manually (script waits 30 seconds)
 - If getting timeouts, increase delays: `--min-delay 5 --max-delay 10`
 
 ### API rate limits
