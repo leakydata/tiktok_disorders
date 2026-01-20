@@ -334,6 +334,92 @@ def init_db():
         """)
 
         # =============================================================================
+        # Comorbidity Tracking (NEW)
+        # =============================================================================
+
+        # Track which conditions appear together across videos
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS comorbidity_pairs (
+                id SERIAL PRIMARY KEY,
+                condition_a TEXT NOT NULL,
+                condition_b TEXT NOT NULL,
+                video_count INTEGER DEFAULT 1,
+                avg_concordance_a REAL,
+                avg_concordance_b REAL,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(condition_a, condition_b),
+                CHECK (condition_a < condition_b)
+            )
+        """)
+
+        # =============================================================================
+        # Treatment/Medication Tracking (NEW)
+        # =============================================================================
+
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS treatments (
+                id SERIAL PRIMARY KEY,
+                video_id INTEGER REFERENCES videos(id) ON DELETE CASCADE,
+                treatment_type TEXT NOT NULL CHECK (treatment_type IN ('medication', 'supplement', 'therapy', 'lifestyle', 'procedure', 'device', 'other')),
+                treatment_name TEXT NOT NULL,
+                dosage TEXT,
+                frequency TEXT,
+                effectiveness TEXT CHECK (effectiveness IN ('very_helpful', 'somewhat_helpful', 'not_helpful', 'made_worse', 'unspecified')),
+                side_effects TEXT[],
+                is_current BOOLEAN,
+                target_condition TEXT,
+                target_symptoms TEXT[],
+                context TEXT,
+                confidence REAL DEFAULT 0.5,
+                extractor_model TEXT,
+                extractor_provider TEXT,
+                extracted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        # =============================================================================
+        # Transcript Quality Metrics (NEW)
+        # =============================================================================
+
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS transcript_quality (
+                id SERIAL PRIMARY KEY,
+                transcript_id INTEGER REFERENCES transcripts(id) ON DELETE CASCADE,
+                quality_score REAL,
+                clarity_score REAL,
+                completeness_score REAL,
+                medical_term_density REAL,
+                filler_word_ratio REAL,
+                avg_confidence REAL,
+                low_confidence_segments INTEGER,
+                total_segments INTEGER,
+                issues TEXT[],
+                assessed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(transcript_id)
+            )
+        """)
+
+        # =============================================================================
+        # Pipeline Progress Tracking (NEW - for resumable runs)
+        # =============================================================================
+
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS pipeline_progress (
+                id SERIAL PRIMARY KEY,
+                run_id INTEGER REFERENCES processing_runs(id) ON DELETE CASCADE,
+                url TEXT NOT NULL,
+                stage TEXT NOT NULL CHECK (stage IN ('queued', 'downloading', 'downloaded', 'transcribing', 'transcribed', 'extracting', 'completed', 'failed')),
+                video_id INTEGER REFERENCES videos(id) ON DELETE SET NULL,
+                error_message TEXT,
+                retry_count INTEGER DEFAULT 0,
+                started_at TIMESTAMP,
+                completed_at TIMESTAMP,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(run_id, url)
+            )
+        """)
+
+        # =============================================================================
         # Indexes
         # =============================================================================
 
@@ -349,6 +435,12 @@ def init_db():
         cur.execute("CREATE INDEX IF NOT EXISTS idx_expected_condition ON expected_symptoms(condition_code)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_concordance_video ON symptom_concordance(video_id)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_concordance_diagnosis ON symptom_concordance(diagnosis_id)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_treatments_video ON treatments(video_id)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_treatments_type ON treatments(treatment_type)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_comorbidity_conditions ON comorbidity_pairs(condition_a, condition_b)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_pipeline_progress_run ON pipeline_progress(run_id)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_pipeline_progress_stage ON pipeline_progress(stage)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_transcript_quality ON transcript_quality(transcript_id)")
 
         conn.commit()
         print("Database schema initialized successfully")
@@ -903,6 +995,402 @@ def save_engagement_snapshot(video_id: int) -> int:
         """, (video_id,))
         result = cur.fetchone()
         return result[0] if result else None
+
+
+# =============================================================================
+# Duplicate Detection (NEW)
+# =============================================================================
+
+def check_duplicate_video(url: str = None, video_id: str = None, title: str = None,
+                          author: str = None, duration: int = None) -> Optional[Dict[str, Any]]:
+    """
+    Check if a video already exists using multiple criteria.
+
+    Returns the existing video if found, None otherwise.
+    """
+    with get_connection() as conn:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+
+        # Exact URL match
+        if url:
+            cur.execute("SELECT * FROM videos WHERE url = %s", (url,))
+            result = cur.fetchone()
+            if result:
+                return {'match_type': 'exact_url', 'video': dict(result)}
+
+        # Platform video ID match
+        if video_id:
+            cur.execute("SELECT * FROM videos WHERE video_id = %s", (video_id,))
+            result = cur.fetchone()
+            if result:
+                return {'match_type': 'video_id', 'video': dict(result)}
+
+        # Fuzzy match: same author + same duration (within 2 seconds) + similar title
+        if author and duration and title:
+            cur.execute("""
+                SELECT * FROM videos
+                WHERE author = %s
+                AND ABS(duration - %s) <= 2
+                AND title IS NOT NULL
+            """, (author, duration))
+            results = cur.fetchall()
+
+            for row in results:
+                # Simple similarity check - if titles share 70% of words
+                existing_words = set(row['title'].lower().split()) if row['title'] else set()
+                new_words = set(title.lower().split())
+                if existing_words and new_words:
+                    overlap = len(existing_words & new_words) / max(len(existing_words), len(new_words))
+                    if overlap > 0.7:
+                        return {'match_type': 'fuzzy', 'video': dict(row), 'similarity': overlap}
+
+        return None
+
+
+def get_potential_duplicates(min_similarity: float = 0.7) -> List[Dict[str, Any]]:
+    """
+    Find potential duplicate videos in the database.
+
+    Returns groups of potentially duplicate videos.
+    """
+    with get_connection() as conn:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+
+        # Find videos with same author and similar duration
+        cur.execute("""
+            SELECT v1.id as id1, v2.id as id2,
+                   v1.title as title1, v2.title as title2,
+                   v1.author, v1.duration as dur1, v2.duration as dur2,
+                   v1.url as url1, v2.url as url2
+            FROM videos v1
+            JOIN videos v2 ON v1.author = v2.author
+                          AND v1.id < v2.id
+                          AND ABS(v1.duration - v2.duration) <= 2
+            WHERE v1.author IS NOT NULL
+        """)
+
+        potential_dupes = []
+        for row in cur.fetchall():
+            # Calculate title similarity
+            words1 = set(row['title1'].lower().split()) if row['title1'] else set()
+            words2 = set(row['title2'].lower().split()) if row['title2'] else set()
+
+            if words1 and words2:
+                similarity = len(words1 & words2) / max(len(words1), len(words2))
+                if similarity >= min_similarity:
+                    potential_dupes.append({
+                        'video_ids': [row['id1'], row['id2']],
+                        'author': row['author'],
+                        'titles': [row['title1'], row['title2']],
+                        'urls': [row['url1'], row['url2']],
+                        'similarity': round(similarity, 3)
+                    })
+
+        return potential_dupes
+
+
+# =============================================================================
+# Treatment Operations (NEW)
+# =============================================================================
+
+def insert_treatment(video_id: int, treatment_type: str, treatment_name: str,
+                    **kwargs) -> int:
+    """Insert a treatment/medication record."""
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO treatments (
+                video_id, treatment_type, treatment_name, dosage, frequency,
+                effectiveness, side_effects, is_current, target_condition,
+                target_symptoms, context, confidence, extractor_model, extractor_provider
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id
+        """, (
+            video_id, treatment_type, treatment_name,
+            kwargs.get('dosage'), kwargs.get('frequency'),
+            kwargs.get('effectiveness', 'unspecified'),
+            kwargs.get('side_effects', []),
+            kwargs.get('is_current'),
+            kwargs.get('target_condition'),
+            kwargs.get('target_symptoms', []),
+            kwargs.get('context'),
+            kwargs.get('confidence', 0.5),
+            kwargs.get('extractor_model'),
+            kwargs.get('extractor_provider')
+        ))
+        return cur.fetchone()[0]
+
+
+def get_treatments_by_video(video_id: int) -> List[Dict[str, Any]]:
+    """Get all treatments mentioned in a video."""
+    with get_connection() as conn:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("""
+            SELECT * FROM treatments
+            WHERE video_id = %s
+            ORDER BY confidence DESC
+        """, (video_id,))
+        return [dict(row) for row in cur.fetchall()]
+
+
+def get_treatment_statistics() -> Dict[str, Any]:
+    """Get statistics about treatments across all videos."""
+    with get_connection() as conn:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+
+        # Most mentioned treatments
+        cur.execute("""
+            SELECT treatment_name, treatment_type, COUNT(*) as mention_count,
+                   AVG(CASE WHEN effectiveness = 'very_helpful' THEN 1.0
+                            WHEN effectiveness = 'somewhat_helpful' THEN 0.66
+                            WHEN effectiveness = 'not_helpful' THEN 0.33
+                            WHEN effectiveness = 'made_worse' THEN 0.0
+                            ELSE NULL END) as avg_effectiveness
+            FROM treatments
+            GROUP BY treatment_name, treatment_type
+            ORDER BY mention_count DESC
+            LIMIT 50
+        """)
+        top_treatments = [dict(row) for row in cur.fetchall()]
+
+        # By type
+        cur.execute("""
+            SELECT treatment_type, COUNT(*) as count
+            FROM treatments
+            GROUP BY treatment_type
+            ORDER BY count DESC
+        """)
+        by_type = [dict(row) for row in cur.fetchall()]
+
+        # By effectiveness
+        cur.execute("""
+            SELECT effectiveness, COUNT(*) as count
+            FROM treatments
+            WHERE effectiveness IS NOT NULL
+            GROUP BY effectiveness
+            ORDER BY count DESC
+        """)
+        by_effectiveness = [dict(row) for row in cur.fetchall()]
+
+        return {
+            'top_treatments': top_treatments,
+            'by_type': by_type,
+            'by_effectiveness': by_effectiveness
+        }
+
+
+# =============================================================================
+# Comorbidity Operations (NEW)
+# =============================================================================
+
+def update_comorbidity_pairs(video_id: int):
+    """
+    Update comorbidity pairs based on diagnoses in a video.
+    Call this after extracting diagnoses.
+    """
+    with get_connection() as conn:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+
+        # Get all diagnoses for this video
+        cur.execute("""
+            SELECT condition_code FROM claimed_diagnoses
+            WHERE video_id = %s AND confidence >= 0.5
+        """, (video_id,))
+        conditions = [row['condition_code'] for row in cur.fetchall()]
+
+        if len(conditions) < 2:
+            return  # Need at least 2 conditions for comorbidity
+
+        # Create pairs (sorted to ensure condition_a < condition_b)
+        from itertools import combinations
+        for cond_a, cond_b in combinations(sorted(conditions), 2):
+            cur.execute("""
+                INSERT INTO comorbidity_pairs (condition_a, condition_b, video_count)
+                VALUES (%s, %s, 1)
+                ON CONFLICT (condition_a, condition_b) DO UPDATE SET
+                    video_count = comorbidity_pairs.video_count + 1,
+                    updated_at = CURRENT_TIMESTAMP
+            """, (cond_a, cond_b))
+
+        conn.commit()
+
+
+def get_comorbidity_matrix() -> List[Dict[str, Any]]:
+    """Get comorbidity data for all condition pairs."""
+    with get_connection() as conn:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("""
+            SELECT condition_a, condition_b, video_count,
+                   avg_concordance_a, avg_concordance_b
+            FROM comorbidity_pairs
+            ORDER BY video_count DESC
+        """)
+        return [dict(row) for row in cur.fetchall()]
+
+
+# =============================================================================
+# Transcript Quality Operations (NEW)
+# =============================================================================
+
+def insert_transcript_quality(transcript_id: int, metrics: Dict[str, Any]) -> int:
+    """Insert transcript quality assessment."""
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO transcript_quality (
+                transcript_id, quality_score, clarity_score, completeness_score,
+                medical_term_density, filler_word_ratio, avg_confidence,
+                low_confidence_segments, total_segments, issues
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (transcript_id) DO UPDATE SET
+                quality_score = EXCLUDED.quality_score,
+                clarity_score = EXCLUDED.clarity_score,
+                completeness_score = EXCLUDED.completeness_score,
+                medical_term_density = EXCLUDED.medical_term_density,
+                filler_word_ratio = EXCLUDED.filler_word_ratio,
+                avg_confidence = EXCLUDED.avg_confidence,
+                low_confidence_segments = EXCLUDED.low_confidence_segments,
+                total_segments = EXCLUDED.total_segments,
+                issues = EXCLUDED.issues,
+                assessed_at = CURRENT_TIMESTAMP
+            RETURNING id
+        """, (
+            transcript_id,
+            metrics.get('quality_score'),
+            metrics.get('clarity_score'),
+            metrics.get('completeness_score'),
+            metrics.get('medical_term_density'),
+            metrics.get('filler_word_ratio'),
+            metrics.get('avg_confidence'),
+            metrics.get('low_confidence_segments'),
+            metrics.get('total_segments'),
+            metrics.get('issues', [])
+        ))
+        return cur.fetchone()[0]
+
+
+def get_transcript_quality(transcript_id: int) -> Optional[Dict[str, Any]]:
+    """Get quality metrics for a transcript."""
+    with get_connection() as conn:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("""
+            SELECT * FROM transcript_quality
+            WHERE transcript_id = %s
+        """, (transcript_id,))
+        result = cur.fetchone()
+        return dict(result) if result else None
+
+
+# =============================================================================
+# Pipeline Progress Operations (NEW - for resumable runs)
+# =============================================================================
+
+def init_pipeline_progress(run_id: int, urls: List[str]):
+    """Initialize progress tracking for a batch of URLs."""
+    with get_connection() as conn:
+        cur = conn.cursor()
+        for url in urls:
+            cur.execute("""
+                INSERT INTO pipeline_progress (run_id, url, stage)
+                VALUES (%s, %s, 'queued')
+                ON CONFLICT (run_id, url) DO NOTHING
+            """, (run_id, url))
+        conn.commit()
+
+
+def update_pipeline_progress(run_id: int, url: str, stage: str,
+                            video_id: int = None, error_message: str = None):
+    """Update progress for a URL in the pipeline."""
+    with get_connection() as conn:
+        cur = conn.cursor()
+
+        if stage == 'failed':
+            cur.execute("""
+                UPDATE pipeline_progress
+                SET stage = %s, error_message = %s, completed_at = CURRENT_TIMESTAMP,
+                    retry_count = retry_count + 1
+                WHERE run_id = %s AND url = %s
+            """, (stage, error_message, run_id, url))
+        elif stage in ('downloading', 'transcribing', 'extracting'):
+            cur.execute("""
+                UPDATE pipeline_progress
+                SET stage = %s, started_at = COALESCE(started_at, CURRENT_TIMESTAMP),
+                    video_id = COALESCE(%s, video_id)
+                WHERE run_id = %s AND url = %s
+            """, (stage, video_id, run_id, url))
+        else:
+            cur.execute("""
+                UPDATE pipeline_progress
+                SET stage = %s, video_id = COALESCE(%s, video_id),
+                    completed_at = CASE WHEN %s = 'completed' THEN CURRENT_TIMESTAMP ELSE completed_at END
+                WHERE run_id = %s AND url = %s
+            """, (stage, video_id, stage, run_id, url))
+
+        conn.commit()
+
+
+def get_incomplete_urls(run_id: int) -> List[Dict[str, Any]]:
+    """Get URLs that haven't completed processing (for resume)."""
+    with get_connection() as conn:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("""
+            SELECT url, stage, video_id, retry_count, error_message
+            FROM pipeline_progress
+            WHERE run_id = %s AND stage NOT IN ('completed')
+            ORDER BY
+                CASE stage
+                    WHEN 'failed' THEN 1
+                    WHEN 'queued' THEN 2
+                    WHEN 'downloading' THEN 3
+                    WHEN 'downloaded' THEN 4
+                    WHEN 'transcribing' THEN 5
+                    WHEN 'transcribed' THEN 6
+                    WHEN 'extracting' THEN 7
+                END
+        """, (run_id,))
+        return [dict(row) for row in cur.fetchall()]
+
+
+def get_latest_run_id() -> Optional[int]:
+    """Get the most recent processing run ID."""
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT id FROM processing_runs
+            ORDER BY started_at DESC
+            LIMIT 1
+        """)
+        result = cur.fetchone()
+        return result[0] if result else None
+
+
+def get_run_progress_summary(run_id: int) -> Dict[str, Any]:
+    """Get summary of progress for a run."""
+    with get_connection() as conn:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("""
+            SELECT stage, COUNT(*) as count
+            FROM pipeline_progress
+            WHERE run_id = %s
+            GROUP BY stage
+        """, (run_id,))
+        by_stage = {row['stage']: row['count'] for row in cur.fetchall()}
+
+        cur.execute("""
+            SELECT COUNT(*) as total FROM pipeline_progress WHERE run_id = %s
+        """, (run_id,))
+        total = cur.fetchone()['total']
+
+        return {
+            'run_id': run_id,
+            'total': total,
+            'completed': by_stage.get('completed', 0),
+            'failed': by_stage.get('failed', 0),
+            'in_progress': total - by_stage.get('completed', 0) - by_stage.get('failed', 0),
+            'by_stage': by_stage
+        }
 
 
 if __name__ == '__main__':

@@ -10,7 +10,7 @@ from datetime import datetime
 import re
 
 from config import AUDIO_DIR, ensure_directories
-from database import insert_video, get_video_by_url
+from database import insert_video, get_video_by_url, check_duplicate_video
 
 
 class VideoDownloader:
@@ -98,7 +98,7 @@ class VideoDownloader:
         Returns:
             Dictionary with video database ID and file path
         """
-        # Check if already downloaded
+        # Check if already downloaded (exact URL match)
         existing = get_video_by_url(url)
         if existing and existing.get('audio_path'):
             print(f"✓ Video already downloaded: {existing['audio_path']}")
@@ -110,6 +110,26 @@ class VideoDownloader:
 
         # Get video info first
         info = self.get_video_info(url)
+
+        # Check for duplicates using multiple criteria
+        duplicate = check_duplicate_video(
+            url=url,
+            video_id=info['video_id'],
+            title=info.get('title'),
+            author=info.get('author'),
+            duration=info.get('duration')
+        )
+        if duplicate:
+            match_type = duplicate['match_type']
+            existing_video = duplicate['video']
+            print(f"⚠ Duplicate detected ({match_type}): already have this video as ID {existing_video['id']}")
+            if existing_video.get('audio_path'):
+                return {
+                    'video_id': existing_video['id'],
+                    'audio_path': existing_video['audio_path'],
+                    'already_existed': True,
+                    'duplicate_match_type': match_type
+                }
         video_id = info['video_id']
         platform = info['platform']
 

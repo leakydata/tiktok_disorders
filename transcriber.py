@@ -29,7 +29,7 @@ from config import (
     WHISPER_COMPUTE_TYPE,
     ensure_directories,
 )
-from database import insert_transcript, get_video_by_id, get_transcript
+from database import insert_transcript, get_video_by_id, get_transcript, insert_transcript_quality
 
 
 class AudioTranscriber:
@@ -57,7 +57,16 @@ class AudioTranscriber:
         if device:
             self.device = device
         else:
-            self.device = 'cuda' if torch and torch.cuda.is_available() else 'cpu'
+            # Detailed CUDA detection
+            if torch is None:
+                print("⚠ PyTorch not installed - using CPU")
+                self.device = 'cpu'
+            elif not torch.cuda.is_available():
+                print("⚠ CUDA not available - using CPU")
+                print("  To enable GPU: rm -rf .venv && uv sync --group cuda")
+                self.device = 'cpu'
+            else:
+                self.device = 'cuda'
 
         print(f"Loading Whisper model '{self.model_size}' on {self.device} ({self.backend})...")
         if self.backend == 'faster-whisper':
@@ -198,8 +207,16 @@ class AudioTranscriber:
             text=text,
             language=detected_language,
             model_used=self.model_size,
-            segments=segments
+            segments=segments,
+            model_backend=self.backend,
+            transcription_device=self.device
         )
+
+        # Assess transcript quality
+        quality_metrics = self._assess_quality(text, segments)
+        if quality_metrics:
+            insert_transcript_quality(db_id, quality_metrics)
+            print(f"  Quality score: {quality_metrics['quality_score']:.2f}")
 
         return {
             'transcript_id': db_id,
@@ -208,7 +225,100 @@ class AudioTranscriber:
             'segments': segments,
             'file_path': str(output_path),
             'word_count': len(text.split()),
+            'quality_score': quality_metrics.get('quality_score') if quality_metrics else None,
             'already_existed': False
+        }
+
+    def _assess_quality(self, text: str, segments: Optional[List] = None) -> Dict[str, Any]:
+        """
+        Assess transcript quality based on various metrics.
+
+        Returns quality metrics dictionary.
+        """
+        if not text or len(text.strip()) < 10:
+            return {'quality_score': 0.0, 'issues': ['transcript_too_short']}
+
+        issues = []
+        words = text.lower().split()
+        word_count = len(words)
+
+        # Filler words detection
+        filler_words = {'um', 'uh', 'like', 'you know', 'basically', 'actually', 'literally', 'so', 'right'}
+        filler_count = sum(1 for w in words if w in filler_words)
+        filler_ratio = filler_count / word_count if word_count > 0 else 0
+
+        if filler_ratio > 0.15:
+            issues.append('high_filler_ratio')
+
+        # Medical term density (basic check)
+        medical_terms = {
+            'pain', 'fatigue', 'dizziness', 'nausea', 'headache', 'joint', 'muscle',
+            'heart', 'blood', 'pressure', 'syndrome', 'chronic', 'diagnosis', 'doctor',
+            'medication', 'symptoms', 'flare', 'eds', 'mcas', 'pots', 'hypermobility',
+            'tachycardia', 'mast', 'cell', 'allergy', 'reaction', 'inflammation'
+        }
+        medical_count = sum(1 for w in words if w in medical_terms)
+        medical_density = medical_count / word_count if word_count > 0 else 0
+
+        # Segment confidence analysis (if available)
+        avg_confidence = None
+        low_confidence_segments = 0
+        total_segments = 0
+
+        if segments:
+            total_segments = len(segments)
+            # Check for segments with low confidence or issues
+            for seg in segments:
+                if isinstance(seg, dict):
+                    # Placeholder - faster-whisper doesn't expose confidence directly
+                    # but we can detect issues via text patterns
+                    seg_text = seg.get('text', '')
+                    if '[' in seg_text or '?' in seg_text or len(seg_text.strip()) < 3:
+                        low_confidence_segments += 1
+
+        # Completeness check (no obvious truncation)
+        completeness_score = 1.0
+        if text.strip().endswith('...') or text.strip().endswith('-'):
+            completeness_score = 0.7
+            issues.append('possible_truncation')
+
+        if word_count < 50:
+            completeness_score *= 0.8
+            issues.append('very_short')
+
+        # Clarity score (based on sentence structure)
+        sentences = text.replace('!', '.').replace('?', '.').split('.')
+        avg_sentence_length = word_count / len(sentences) if sentences else 0
+
+        clarity_score = 1.0
+        if avg_sentence_length > 40:
+            clarity_score = 0.7
+            issues.append('long_sentences')
+        elif avg_sentence_length < 5:
+            clarity_score = 0.8
+            issues.append('fragmented')
+
+        # Overall quality score
+        quality_score = (
+            (1 - filler_ratio) * 0.2 +
+            min(medical_density * 10, 1.0) * 0.2 +
+            completeness_score * 0.3 +
+            clarity_score * 0.3
+        )
+
+        # Penalize if too many issues
+        quality_score = max(0.1, quality_score - len(issues) * 0.05)
+
+        return {
+            'quality_score': round(quality_score, 3),
+            'clarity_score': round(clarity_score, 3),
+            'completeness_score': round(completeness_score, 3),
+            'medical_term_density': round(medical_density, 4),
+            'filler_word_ratio': round(filler_ratio, 4),
+            'avg_confidence': avg_confidence,
+            'low_confidence_segments': low_confidence_segments,
+            'total_segments': total_segments,
+            'issues': issues
         }
 
     def transcribe_batch(self, video_ids: List[int], **kwargs) -> List[Dict[str, Any]]:

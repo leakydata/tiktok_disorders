@@ -21,7 +21,8 @@ from config import (
 from database import (
     insert_symptom, get_transcript, get_video_by_id,
     insert_claimed_diagnosis, get_diagnoses_by_video,
-    calculate_symptom_concordance
+    calculate_symptom_concordance, insert_treatment,
+    update_comorbidity_pairs
 )
 
 
@@ -323,9 +324,125 @@ TRANSCRIPT:
                 'error': str(e)
             }
 
+    def extract_treatments(self, video_id: int) -> Dict[str, Any]:
+        """
+        Extract treatments/medications mentioned in a video's transcript.
+
+        Args:
+            video_id: Database ID of the video
+
+        Returns:
+            Dictionary with treatment extraction results
+        """
+        # Get transcript
+        transcript_data = get_transcript(video_id)
+        if not transcript_data:
+            raise ValueError(f"No transcript found for video {video_id}")
+
+        transcript_text = transcript_data['text']
+
+        if len(transcript_text.split()) < 10:
+            return {'video_id': video_id, 'treatments_found': 0, 'treatments_saved': 0}
+
+        print(f"Extracting treatments from video {video_id}...")
+
+        prompt = f"""Analyze this transcript and extract any treatments, medications, supplements, or therapies mentioned.
+
+For each treatment, provide:
+1. **treatment_type**: One of: "medication", "supplement", "therapy", "lifestyle", "procedure", "device", "other"
+2. **treatment_name**: The name of the treatment/medication
+3. **dosage**: Dosage if mentioned (e.g., "10mg", "twice daily")
+4. **frequency**: How often taken if mentioned
+5. **effectiveness**: Speaker's assessment - "very_helpful", "somewhat_helpful", "not_helpful", "made_worse", or "unspecified"
+6. **side_effects**: Array of side effects mentioned (can be empty)
+7. **is_current**: true if currently using, false if stopped, null if unclear
+8. **target_condition**: What condition it's for (e.g., "POTS", "pain", "sleep")
+9. **target_symptoms**: Array of symptoms it addresses
+10. **context**: The relevant quote
+11. **confidence**: 0.0-1.0 based on how clearly mentioned
+
+Common treatments for EDS/MCAS/POTS include:
+- Medications: beta blockers, antihistamines, mast cell stabilizers, pain meds, etc.
+- Supplements: salt tablets, electrolytes, vitamins, collagen, etc.
+- Therapies: physical therapy, occupational therapy, etc.
+- Lifestyle: compression garments, diet changes, pacing, etc.
+- Devices: heart rate monitors, mobility aids, etc.
+
+Return a JSON array:
+[
+  {{
+    "treatment_type": "medication",
+    "treatment_name": "propranolol",
+    "dosage": "10mg",
+    "frequency": "twice daily",
+    "effectiveness": "very_helpful",
+    "side_effects": ["fatigue"],
+    "is_current": true,
+    "target_condition": "POTS",
+    "target_symptoms": ["tachycardia", "palpitations"],
+    "context": "propranolol has been a game changer for my POTS",
+    "confidence": 0.95
+  }}
+]
+
+Return ONLY the JSON array. If no treatments are mentioned, return [].
+
+TRANSCRIPT:
+{transcript_text}"""
+
+        try:
+            response_text = self._call_model(prompt)
+
+            # Extract JSON
+            if '```json' in response_text:
+                response_text = response_text.split('```json')[1].split('```')[0].strip()
+            elif '```' in response_text:
+                response_text = response_text.split('```')[1].split('```')[0].strip()
+
+            treatments = json.loads(response_text)
+
+            # Save treatments
+            saved_count = 0
+            for treatment in treatments:
+                if treatment.get('confidence', 0) >= 0.4:
+                    insert_treatment(
+                        video_id=video_id,
+                        treatment_type=treatment.get('treatment_type', 'other'),
+                        treatment_name=treatment.get('treatment_name', 'Unknown'),
+                        dosage=treatment.get('dosage'),
+                        frequency=treatment.get('frequency'),
+                        effectiveness=treatment.get('effectiveness', 'unspecified'),
+                        side_effects=treatment.get('side_effects', []),
+                        is_current=treatment.get('is_current'),
+                        target_condition=treatment.get('target_condition'),
+                        target_symptoms=treatment.get('target_symptoms', []),
+                        context=treatment.get('context'),
+                        confidence=treatment.get('confidence', 0.5),
+                        extractor_model=self.model,
+                        extractor_provider=self.provider
+                    )
+                    saved_count += 1
+
+            print(f"✓ Extracted {len(treatments)} treatments, saved {saved_count}")
+
+            return {
+                'video_id': video_id,
+                'treatments_found': len(treatments),
+                'treatments_saved': saved_count,
+                'success': True
+            }
+
+        except Exception as e:
+            print(f"✗ Error extracting treatments: {e}")
+            return {
+                'video_id': video_id,
+                'success': False,
+                'error': str(e)
+            }
+
     def extract_all(self, video_id: int, min_confidence: Optional[float] = None) -> Dict[str, Any]:
         """
-        Extract symptoms, diagnoses, and calculate concordance for a video.
+        Extract symptoms, diagnoses, treatments, and calculate concordance for a video.
 
         Args:
             video_id: Database ID of the video
@@ -340,6 +457,9 @@ TRANSCRIPT:
         # Extract diagnoses
         diagnosis_result = self.extract_diagnoses(video_id)
 
+        # Extract treatments
+        treatment_result = self.extract_treatments(video_id)
+
         # Calculate concordance for each diagnosis
         concordance_results = []
         if diagnosis_result.get('success') and diagnosis_result.get('diagnosis_ids'):
@@ -352,10 +472,19 @@ TRANSCRIPT:
                 except Exception as e:
                     print(f"  Could not calculate concordance for {diag_id}: {e}")
 
+            # Update comorbidity pairs if multiple diagnoses
+            if len(diagnosis_result['diagnosis_ids']) >= 2:
+                try:
+                    update_comorbidity_pairs(video_id)
+                    print(f"  Updated comorbidity tracking")
+                except Exception as e:
+                    print(f"  Could not update comorbidity: {e}")
+
         return {
             'video_id': video_id,
             'symptoms': symptom_result,
             'diagnoses': diagnosis_result,
+            'treatments': treatment_result,
             'concordance': concordance_results,
             'success': symptom_result.get('success', False) and diagnosis_result.get('success', False)
         }
