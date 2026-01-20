@@ -80,9 +80,9 @@ def report_diagnoses() -> Dict[str, Any]:
 
         # Diagnosis type distribution
         cur.execute("""
-            SELECT diagnosis_type, COUNT(*) as count
+            SELECT condition_name, COUNT(*) as count
             FROM claimed_diagnoses
-            GROUP BY diagnosis_type
+            GROUP BY condition_name
             ORDER BY count DESC
         """)
         by_type = [dict(r) for r in cur.fetchall()]
@@ -124,10 +124,10 @@ def report_symptoms() -> Dict[str, Any]:
 
         # Most common symptoms
         cur.execute("""
-            SELECT symptom_name, category, COUNT(*) as count,
+            SELECT symptom, category, COUNT(*) as count,
                    AVG(confidence) as avg_confidence
             FROM symptoms
-            GROUP BY symptom_name, category
+            GROUP BY symptom, category
             ORDER BY count DESC
             LIMIT 50
         """)
@@ -166,7 +166,7 @@ def report_symptoms() -> Dict[str, Any]:
         # Symptoms per condition (via concordance)
         cur.execute("""
             SELECT cd.condition_code,
-                   COUNT(DISTINCT s.symptom_name) as unique_symptoms,
+                   COUNT(DISTINCT s.symptom) as unique_symptoms,
                    COUNT(s.id) as total_mentions
             FROM symptoms s
             JOIN claimed_diagnoses cd ON s.video_id = cd.video_id
