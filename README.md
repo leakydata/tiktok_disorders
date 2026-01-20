@@ -88,6 +88,9 @@ python pipeline.py "url1" "url2" "url3"
 # Process from a file (one URL per line)
 python pipeline.py --urls-file urls.txt
 
+# Combine file and CLI URLs (deduplicates automatically)
+python pipeline.py --urls-file urls.txt "https://extra-url.com/video"
+
 # Use Ollama instead of Claude for extraction
 python pipeline.py --provider ollama --model llama3 "url"
 ```
@@ -215,6 +218,28 @@ uv sync --group cuda
 
 ### TikTok Impersonation Warning
 The warning about impersonation is normal - curl_cffi is included to handle this.
+
+## URL File Format
+
+When using `--urls-file`, the file supports:
+
+```text
+# Full-line comments start with # or //
+// This is also a comment
+
+https://www.tiktok.com/@user1/video/123
+https://www.tiktok.com/@user2/video/456  # inline comments work too
+https://youtube.com/watch?v=abc  // this style too
+
+# Blank lines are ignored
+https://www.tiktok.com/@user3/video/789
+```
+
+- One URL per line
+- Comments with `#` or `//` (full-line or inline)
+- Blank lines ignored
+- Whitespace trimmed
+- Duplicates automatically removed
 
 ## License
 
