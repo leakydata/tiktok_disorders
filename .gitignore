@@ -1,5 +1,11 @@
-# Environment
+# Environment and secrets
 .env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials.json
+secrets.json
 venv/
 env/
 ENV/
@@ -27,11 +33,13 @@ wheels/
 .installed.cfg
 *.egg
 
-# Data directories
+# Data directories (contains downloaded videos/audio and transcripts)
 data/
 *.mp3
 *.wav
 *.m4a
+*.mp4
+*.webm
 
 # Database
 *.db
@@ -63,3 +71,7 @@ Thumbs.db
 *.log
 
 .claude
+
+# URL files (may contain private video links)
+urls.txt
+urls*.txt
