@@ -371,14 +371,19 @@ def cmd_run(args):
         results = pipeline.process_batch(merged_urls, tags=args.tags)
 
     # Move successfully processed URLs to urls_processed.txt (unless disabled)
-    if not args.no_move_processed:
+    if not args.no_move_processed and args.urls_file:
         successful_urls = [r['url'] for r in results if r.get('success')]
-        if successful_urls and args.urls_file:
+        print(f"\nURL Processing Summary:")
+        print(f"  Total results: {len(results)}")
+        print(f"  Successful: {len(successful_urls)}")
+        
+        if successful_urls:
             moved = mark_urls_as_processed(successful_urls, 
                                            pending_file=args.urls_file,
                                            processed_file='urls_processed.txt')
-            if moved > 0:
-                print(f"\nMoved {moved} successfully processed URLs to urls_processed.txt")
+            print(f"  Moved to urls_processed.txt: {moved}")
+            if moved < len(successful_urls):
+                print(f"  (Some URLs may not have been in {args.urls_file} to move)")
 
     print("\n" + json.dumps(results, indent=2, default=str))
     return 0

@@ -152,12 +152,26 @@ def mark_urls_as_processed(urls: List[str],
     
     Returns count of URLs moved.
     """
-    urls_to_move = set(u.strip() for u in urls)
+    # Normalize URLs for matching (strip whitespace, remove trailing slashes)
+    def normalize(u):
+        u = u.strip().rstrip('/')
+        return u
+    
+    urls_to_move = set(normalize(u) for u in urls if u)
     pending_path = Path(pending_file)
     processed_path = Path(processed_file)
     
+    # Create processed file if it doesn't exist
+    if not processed_path.exists():
+        processed_path.touch()
+    
     if not pending_path.exists():
-        return 0
+        # No pending file, but still record the URLs as processed
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        with open(processed_path, 'a', encoding='utf-8') as f:
+            for url in urls_to_move:
+                f.write(f"{url} # processed {timestamp}\n")
+        return len(urls_to_move)
     
     lines = pending_path.read_text(encoding='utf-8').splitlines()
     
@@ -172,10 +186,22 @@ def mark_urls_as_processed(urls: List[str],
         if ' //' in url_part:
             url_part = url_part.split(' //', 1)[0].strip()
         
-        if url_part in urls_to_move:
-            moved_urls.append(url_part)
+        # Normalize for comparison
+        normalized_url = normalize(url_part)
+        
+        if normalized_url in urls_to_move:
+            moved_urls.append(url_part)  # Keep original URL format
         else:
             new_lines.append(line)
+    
+    # If no URLs found in pending file, still record them as processed
+    # (they might have been processed via command line or already removed)
+    if not moved_urls and urls_to_move:
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        with open(processed_path, 'a', encoding='utf-8') as f:
+            for url in urls_to_move:
+                f.write(f"{url} # processed {timestamp}\n")
+        return len(urls_to_move)
     
     if not moved_urls:
         return 0
