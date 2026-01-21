@@ -93,6 +93,78 @@ def backup_transcript(video_id: int, transcript_id: int, text: str, author: str)
     return backup_file
 
 
+def backup_extractions(video_id: int):
+    """Backup and return old extraction data before clearing."""
+    backup_dir = TRANSCRIPT_DIR / '_backups'
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    
+    with get_connection() as conn:
+        cur = conn.cursor()
+        
+        # Get old symptoms
+        cur.execute("SELECT * FROM symptoms WHERE video_id = %s", (video_id,))
+        columns = [desc[0] for desc in cur.description]
+        symptoms = [dict(zip(columns, row)) for row in cur.fetchall()]
+        
+        # Get old diagnoses
+        cur.execute("SELECT * FROM claimed_diagnoses WHERE video_id = %s", (video_id,))
+        columns = [desc[0] for desc in cur.description]
+        diagnoses = [dict(zip(columns, row)) for row in cur.fetchall()]
+        
+        # Get old treatments
+        cur.execute("SELECT * FROM treatments WHERE video_id = %s", (video_id,))
+        columns = [desc[0] for desc in cur.description]
+        treatments = [dict(zip(columns, row)) for row in cur.fetchall()]
+        
+        # Get old narrative elements
+        cur.execute("SELECT * FROM narrative_elements WHERE video_id = %s", (video_id,))
+        columns = [desc[0] for desc in cur.description]
+        narrative = [dict(zip(columns, row)) for row in cur.fetchall()]
+    
+    if symptoms or diagnoses or treatments or narrative:
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        backup_file = backup_dir / f"extractions_{video_id}_backup_{timestamp}.json"
+        
+        # Convert datetime objects to strings for JSON serialization
+        def serialize(obj):
+            if hasattr(obj, 'isoformat'):
+                return obj.isoformat()
+            return str(obj)
+        
+        backup_data = {
+            'video_id': video_id,
+            'symptoms': symptoms,
+            'diagnoses': diagnoses,
+            'treatments': treatments,
+            'narrative_elements': narrative,
+            'backed_up_at': datetime.now().isoformat()
+        }
+        
+        with open(backup_file, 'w', encoding='utf-8') as f:
+            json.dump(backup_data, f, indent=2, ensure_ascii=False, default=serialize)
+        
+        return backup_file
+    
+    return None
+
+
+def clear_extractions(video_id: int):
+    """Clear all extraction data for a video."""
+    with get_connection() as conn:
+        cur = conn.cursor()
+        
+        # Delete in order to respect foreign keys
+        cur.execute("DELETE FROM symptom_concordance WHERE diagnosis_id IN (SELECT id FROM claimed_diagnoses WHERE video_id = %s)", (video_id,))
+        cur.execute("DELETE FROM narrative_elements WHERE video_id = %s", (video_id,))
+        cur.execute("DELETE FROM treatments WHERE video_id = %s", (video_id,))
+        cur.execute("DELETE FROM claimed_diagnoses WHERE video_id = %s", (video_id,))
+        cur.execute("DELETE FROM symptoms WHERE video_id = %s", (video_id,))
+        
+        conn.commit()
+        
+        return True
+
+
 def update_transcript_in_db(transcript_id: int, new_text: str, model: str):
     """Update the transcript text in the database."""
     with get_connection() as conn:
