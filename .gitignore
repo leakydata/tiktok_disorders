@@ -34,12 +34,27 @@ wheels/
 *.egg
 
 # Data directories (contains downloaded videos/audio and transcripts)
+# This excludes ALL research data - audio, transcripts, reports, visualizations
 data/
+data/audio/
+data/transcripts/
+data/reports/
+data/visualizations/
+data/exports/
+
+# Audio/video files (in case any end up outside data/)
 *.mp3
 *.wav
 *.m4a
 *.mp4
 *.webm
+*.ogg
+*.flac
+
+# Large model files
+*.bin
+*.pt
+*.onnx
 
 # Database
 *.db
@@ -55,6 +70,15 @@ analysis_results.json
 *.csv
 *.png
 *.jpg
+*.jpeg
+*.svg
+
+# Backup files from retranscribe
+data/transcripts/_backups/
+
+# Hugging Face cache (Whisper models)
+.cache/
+~/.cache/huggingface/
 
 # IDE
 .vscode/
