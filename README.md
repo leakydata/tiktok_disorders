@@ -425,9 +425,36 @@ uv run python scripts/retranscribe.py --transcribe-only --backup
 
 # Test on 10 videos first
 uv run python scripts/retranscribe.py --limit 10 --backup --provider ollama --model gpt-oss:20b
+
+# Continue from a specific video (resume after interruption)
+uv run python scripts/retranscribe.py --start-from 240 --backup --provider ollama --model gpt-oss:20b
+
+# Retry only specific failed videos
+uv run python scripts/retranscribe.py --video-ids 217 239 --backup --provider ollama --model gpt-oss:20b
 ```
 
+| Option | Description |
+|--------|-------------|
+| `--dry-run` | Preview without making changes |
+| `--backup` | Save old data to `data/transcripts/_backups/` |
+| `--transcribe-only` | Skip re-extraction |
+| `--start-from N` | Start from video ID N (skip earlier) |
+| `--video-ids` | Process only specific video IDs |
+| `--limit N` | Process only first N videos |
+| `--provider` | LLM provider (default: ollama) |
+| `--model` | LLM model (default: gpt-oss:20b) |
+
 This ensures dataset consistency for publication.
+
+### Treatment Normalization
+
+The extractor automatically normalizes LLM responses to valid database values:
+
+**Treatment Types:** `diet` -> `lifestyle`, `drug` -> `medication`, `vitamin` -> `supplement`, etc.
+
+**Effectiveness:** `flared_harder` -> `made_worse`, `amazing` -> `very_helpful`, `useless` -> `not_helpful`, etc.
+
+This prevents database constraint errors when the LLM returns creative but non-standard values.
 
 ## Pipeline Stages
 
