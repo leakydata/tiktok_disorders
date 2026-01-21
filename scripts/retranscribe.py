@@ -317,98 +317,121 @@ def reprocess_video(transcriber: AudioTranscriber, extractor: SymptomExtractor,
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Re-transcribe videos with improved medical vocabulary.'
+        description='Re-transcribe and re-extract videos for dataset consistency.'
     )
     parser.add_argument('--video-ids', type=int, nargs='+',
-                        help='Specific video IDs to re-transcribe')
+                        help='Specific video IDs to reprocess')
     parser.add_argument('--limit', type=int,
                         help='Limit to first N videos')
     parser.add_argument('--backup', action='store_true',
-                        help='Backup old transcripts before overwriting')
+                        help='Backup old data before overwriting')
     parser.add_argument('--dry-run', action='store_true',
                         help='Show what would be done without making changes')
+    parser.add_argument('--transcribe-only', action='store_true',
+                        help='Only re-transcribe, skip extraction')
     parser.add_argument('--whisper-model', default='large-v3',
                         help='Whisper model to use (default: large-v3)')
+    parser.add_argument('--provider', default='ollama',
+                        help='LLM provider for extraction (anthropic or ollama)')
+    parser.add_argument('--model', default='gpt-oss:20b',
+                        help='LLM model for extraction (default: gpt-oss:20b)')
     args = parser.parse_args()
     
-    print("=" * 60)
-    print("Re-transcribe Videos with Medical Vocabulary")
-    print("=" * 60)
+    print("=" * 70)
+    print("Re-transcribe and Re-extract Videos for Dataset Consistency")
+    print("=" * 70)
     
     if args.dry_run:
         print("\n[DRY RUN MODE - No changes will be made]\n")
     
+    if args.transcribe_only:
+        print("Mode: Transcribe only (extraction will be skipped)")
+    else:
+        print(f"Mode: Full reprocess (transcribe + extract with {args.provider}/{args.model})")
+    
     # Get videos to process
-    print("Finding videos with transcripts...")
+    print("\nFinding videos with transcripts...")
     videos = get_videos_with_transcripts(limit=args.limit, video_ids=args.video_ids)
     
     if not videos:
-        print("No videos found to re-transcribe.")
+        print("No videos found to reprocess.")
         return 0
     
-    print(f"Found {len(videos)} video(s) to re-transcribe")
+    print(f"Found {len(videos)} video(s) to reprocess")
     
     if args.backup:
-        print("Backup mode: Old transcripts will be saved to data/transcripts/_backups/")
+        print("Backup mode: Old data will be saved to data/transcripts/_backups/")
     
-    # Initialize transcriber (only if not dry-run, to save time)
+    # Initialize components (only if not dry-run)
     transcriber = None
+    extractor = None
+    
     if not args.dry_run:
         print(f"\nLoading Whisper model '{args.whisper_model}'...")
         transcriber = AudioTranscriber(model_size=args.whisper_model)
+        
+        if not args.transcribe_only:
+            print(f"Initializing extractor ({args.provider}/{args.model})...")
+            extractor = SymptomExtractor(
+                provider=args.provider,
+                model=args.model,
+                max_workers=1  # Sequential for reprocessing to avoid overwhelming
+            )
     
     # Process videos
-    print(f"\n{'=' * 60}")
+    print(f"\n{'=' * 70}")
     success_count = 0
     error_count = 0
-    would_change_count = 0
+    total_symptoms = 0
+    total_diagnoses = 0
+    total_treatments = 0
     
     for i, (video_id, audio_path, author, transcript_id, old_text) in enumerate(videos, 1):
         print(f"\n[{i}/{len(videos)}] Video {video_id} (@{author or 'unknown'})")
         
-        result = retranscribe_video(
+        result = reprocess_video(
             transcriber=transcriber,
+            extractor=extractor,
             video_id=video_id,
             audio_path=audio_path,
             author=author,
             old_transcript_id=transcript_id,
             old_text=old_text,
             do_backup=args.backup,
-            dry_run=args.dry_run
+            dry_run=args.dry_run,
+            transcribe_only=args.transcribe_only
         )
         
         if result['success']:
             success_count += 1
-            if args.dry_run:
-                if result.get('would_change'):
-                    would_change_count += 1
-                    print(f"    Would change: {result['old_length']} -> {result['new_length']} chars")
-                else:
-                    print(f"    No changes needed (corrections already match)")
-            else:
-                print(f"    Done: {result['word_count']} words")
+            if not args.dry_run and not args.transcribe_only:
+                total_symptoms += result['extract'].get('symptoms', 0)
+                total_diagnoses += result['extract'].get('diagnoses', 0)
+                total_treatments += result['extract'].get('treatments', 0)
         else:
             error_count += 1
-            print(f"    Error: {result.get('error', 'Unknown error')}")
+            print(f"    ERROR: {result.get('error', 'Unknown error')}")
     
     # Summary
-    print(f"\n{'=' * 60}")
+    print(f"\n{'=' * 70}")
     print("SUMMARY")
-    print("=" * 60)
+    print("=" * 70)
     
     if args.dry_run:
-        print(f"  Videos checked: {len(videos)}")
-        print(f"  Would change: {would_change_count}")
-        print(f"  No changes needed: {success_count - would_change_count}")
-        print(f"  Errors: {error_count}")
+        print(f"  Videos to reprocess: {len(videos)}")
+        print(f"  Mode: {'Transcribe only' if args.transcribe_only else 'Transcribe + Extract'}")
         print(f"\nRun without --dry-run to apply changes.")
     else:
-        print(f"  Successfully re-transcribed: {success_count}")
+        print(f"  Successfully reprocessed: {success_count}/{len(videos)}")
         print(f"  Errors: {error_count}")
+        if not args.transcribe_only:
+            print(f"\n  Total symptoms extracted: {total_symptoms}")
+            print(f"  Total diagnoses extracted: {total_diagnoses}")
+            print(f"  Total treatments extracted: {total_treatments}")
         if args.backup:
-            print(f"  Backups saved to: data/transcripts/_backups/")
+            print(f"\n  Backups saved to: data/transcripts/_backups/")
     
-    print("=" * 60)
+    print("=" * 70)
     return 0 if error_count == 0 else 1
 
 
