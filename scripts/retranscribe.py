@@ -179,41 +179,54 @@ def update_transcript_in_db(transcript_id: int, new_text: str, model: str):
         conn.commit()
 
 
-def retranscribe_video(transcriber: AudioTranscriber, video_id: int, audio_path: str, 
-                       author: str, old_transcript_id: int, old_text: str,
-                       do_backup: bool = False, dry_run: bool = False):
-    """Re-transcribe a single video."""
+def reprocess_video(transcriber: AudioTranscriber, extractor: SymptomExtractor,
+                    video_id: int, audio_path: str, author: str, 
+                    old_transcript_id: int, old_text: str,
+                    do_backup: bool = False, dry_run: bool = False,
+                    transcribe_only: bool = False):
+    """Re-transcribe and optionally re-extract a single video."""
+    
+    result = {
+        'video_id': video_id,
+        'success': False,
+        'transcribe': {},
+        'extract': {}
+    }
     
     # Check if audio file exists
     if not audio_path or not Path(audio_path).exists():
-        return {
-            'video_id': video_id,
-            'success': False,
-            'error': f'Audio file not found: {audio_path}'
-        }
+        result['error'] = f'Audio file not found: {audio_path}'
+        return result
     
+    # Backup old data
     if do_backup and not dry_run:
         backup_file = backup_transcript(video_id, old_transcript_id, old_text, author)
-        print(f"    Backed up to: {backup_file}")
+        print(f"    Backed up transcript to: {backup_file}")
+        
+        if not transcribe_only:
+            extract_backup = backup_extractions(video_id)
+            if extract_backup:
+                print(f"    Backed up extractions to: {extract_backup}")
     
     if dry_run:
-        # Just show what the corrections would do to existing text
+        # Just show what the corrections would do
         corrected = _apply_transcription_corrections(old_text)
         changes = corrected != old_text
-        return {
-            'video_id': video_id,
-            'success': True,
-            'dry_run': True,
+        result['success'] = True
+        result['dry_run'] = True
+        result['transcribe'] = {
             'would_change': changes,
             'old_length': len(old_text),
             'new_length': len(corrected) if changes else len(old_text)
         }
+        if not transcribe_only:
+            result['extract'] = {'would_reextract': True}
+        return result
     
-    # Actually re-transcribe
-    print(f"    Transcribing: {audio_path}")
+    # ===== STAGE 1: Re-transcribe =====
+    print(f"    [1/2] Transcribing: {Path(audio_path).name}")
     
     try:
-        # Use faster-whisper transcribe directly (bypass the database check)
         from transcriber import MEDICAL_VOCABULARY_PROMPT
         
         segments_iter, info = transcriber.model.transcribe(
@@ -235,7 +248,7 @@ def retranscribe_video(transcriber: AudioTranscriber, video_id: int, audio_path:
         # Update in database
         update_transcript_in_db(old_transcript_id, new_text, transcriber.model_size)
         
-        # Also save to file
+        # Save to file
         author_dir = _get_author_dir(author or '_unknown')
         output_filename = f"transcript_{video_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
         output_path = author_dir / output_filename
@@ -253,21 +266,53 @@ def retranscribe_video(transcriber: AudioTranscriber, video_id: int, audio_path:
         with open(output_path, 'w', encoding='utf-8') as f:
             json.dump(transcript_data, f, indent=2, ensure_ascii=False)
         
-        return {
-            'video_id': video_id,
+        result['transcribe'] = {
             'success': True,
-            'old_length': len(old_text),
-            'new_length': len(new_text),
             'word_count': len(new_text.split()),
             'output_file': str(output_path)
         }
+        print(f"        Done: {len(new_text.split())} words")
         
     except Exception as e:
-        return {
-            'video_id': video_id,
-            'success': False,
-            'error': str(e)
+        result['transcribe'] = {'success': False, 'error': str(e)}
+        result['error'] = f'Transcription failed: {e}'
+        return result
+    
+    # ===== STAGE 2: Re-extract (if not transcribe-only) =====
+    if transcribe_only:
+        result['success'] = True
+        result['extract'] = {'skipped': True}
+        return result
+    
+    print(f"    [2/2] Extracting symptoms, diagnoses, treatments...")
+    
+    try:
+        # Clear old extraction data
+        clear_extractions(video_id)
+        
+        # Re-extract with force=True to bypass the "already extracted" check
+        extract_result = extractor.extract_all(video_id, force=True)
+        
+        result['extract'] = {
+            'success': extract_result.get('success', False),
+            'symptoms': extract_result.get('symptoms_saved', 0),
+            'diagnoses': extract_result.get('diagnoses_saved', 0),
+            'treatments': extract_result.get('treatments_saved', 0)
         }
+        
+        if extract_result.get('success'):
+            print(f"        Done: {extract_result.get('symptoms_saved', 0)} symptoms, "
+                  f"{extract_result.get('diagnoses_saved', 0)} diagnoses, "
+                  f"{extract_result.get('treatments_saved', 0)} treatments")
+            result['success'] = True
+        else:
+            result['error'] = f"Extraction failed: {extract_result.get('error', 'Unknown')}"
+        
+    except Exception as e:
+        result['extract'] = {'success': False, 'error': str(e)}
+        result['error'] = f'Extraction failed: {e}'
+    
+    return result
 
 
 def main():
