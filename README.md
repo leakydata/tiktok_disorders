@@ -314,6 +314,7 @@ Reports are saved to `data/reports/` and CSV exports to `data/exports/`.
 | `pipeline.py stats` | Show database statistics |
 | `scripts/discover.py` | Find TikTok videos from users/hashtags |
 | `scripts/init_db.py` | Initialize database schema |
+| `scripts/retranscribe.py` | Re-transcribe and re-extract for consistency |
 
 ## Example Workflows
 
@@ -379,6 +380,54 @@ Suggested hashtags for chronic illness research (note: hashtag discovery may be 
 - **MCAS**: `#MCAS`, `#mastcellactivation`, `#histamineintolerance`
 - **CIRS**: `#CIRS`, `#moldillness`, `#biotoxin`
 - **General**: `#chronicillness`, `#spoonie`, `#invisibleillness`, `#chronicpain`
+
+## Medical Vocabulary & Transcription Accuracy
+
+The transcriber includes specialized support for chronic illness terminology:
+
+### Vocabulary Hints
+
+Whisper receives context about expected medical terms before transcribing, including:
+- Condition names (EDS, MCAS, POTS, CIRS, hEDS, dysautonomia)
+- 50+ medications (Xolair, Rhapsido, Dupixent, cromolyn, ketotifen, midodrine, etc.)
+- Supplements (quercetin, DAO enzyme, magnesium glycinate, LMNT, etc.)
+- Medical devices (compression stockings, ring splints, PICC line, port-a-cath)
+- Medical terms (interleukin, tryptase, subluxation, gastroparesis, etc.)
+
+### Auto-Corrections
+
+200+ post-processing corrections fix common Whisper mistakes:
+
+| Whisper hears | Corrected to |
+|---------------|--------------|
+| mass cell | mast cell |
+| Zolair | Xolair |
+| wrap seedo | Rhapsido |
+| em cass / MKAS | MCAS |
+| ehler danlos | Ehlers-Danlos |
+| sigh bo | SIBO |
+| inter leukin | interleukin |
+| gastro paresis | gastroparesis |
+
+### Re-transcribe for Consistency
+
+If you need to update existing transcripts with the improved vocabulary:
+
+```powershell
+# Preview what would change
+uv run python scripts/retranscribe.py --dry-run
+
+# Re-transcribe and re-extract all videos (with backup)
+uv run python scripts/retranscribe.py --backup --provider ollama --model gpt-oss:20b
+
+# Re-transcribe only (keep existing extractions)
+uv run python scripts/retranscribe.py --transcribe-only --backup
+
+# Test on 10 videos first
+uv run python scripts/retranscribe.py --limit 10 --backup --provider ollama --model gpt-oss:20b
+```
+
+This ensures dataset consistency for publication.
 
 ## Pipeline Stages
 
