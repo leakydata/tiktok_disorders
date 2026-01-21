@@ -34,6 +34,128 @@ from config import (
 from database import insert_transcript, get_video_by_id, get_transcript, insert_transcript_quality
 
 
+# Medical vocabulary prompt to help Whisper recognize specialized terms
+# This provides context about expected terminology
+MEDICAL_VOCABULARY_PROMPT = """This is a video about chronic illness conditions including:
+- Ehlers-Danlos Syndrome (EDS), hypermobile EDS (hEDS), classical EDS, vascular EDS
+- Mast Cell Activation Syndrome (MCAS), mast cells, histamine, antihistamines
+- Postural Orthostatic Tachycardia Syndrome (POTS), dysautonomia, orthostatic intolerance
+- Chronic Inflammatory Response Syndrome (CIRS), biotoxin illness, mold illness
+
+Medical terms that may be mentioned: interleukin, cytokines, collagen, connective tissue,
+tryptase, prostaglandins, leukotrienes, immunoglobulin, autoimmune, autonomic nervous system,
+tachycardia, bradycardia, hypermobility, subluxation, dislocation, proprioception,
+gastroparesis, SIBO, small intestinal bacterial overgrowth, Lyme disease, fibromyalgia,
+chronic fatigue syndrome, myalgic encephalomyelitis, brain fog, dysautonomia, syncope,
+presyncope, orthostatic, supine, tilt table test, compression garments, electrolytes,
+IV fluids, saline, midodrine, fludrocortisone, beta blockers, mast cell stabilizers,
+cromolyn, ketotifen, famotidine, cetirizine, quercetin, DAO enzyme, low histamine diet.
+
+Abbreviations: EDS, hEDS, MCAS, POTS, CIRS, CFS, ME, SIBO, ANS, HR, BP, GI."""
+
+
+# Common transcription errors and their corrections
+TRANSCRIPTION_CORRECTIONS = {
+    # MCAS variations
+    'mass cell': 'mast cell',
+    'mass cells': 'mast cells',
+    'mass cell activation': 'mast cell activation',
+    'M-CAS': 'MCAS',
+    'M CAS': 'MCAS',
+    'em cass': 'MCAS',
+    'emcass': 'MCAS',
+    'MCA S': 'MCAS',
+    
+    # EDS variations
+    'E-D-S': 'EDS',
+    'E.D.S.': 'EDS',
+    'ehler danlos': 'Ehlers-Danlos',
+    'ehlers danlos': 'Ehlers-Danlos',
+    'ehler-danlos': 'Ehlers-Danlos',
+    'eller danlos': 'Ehlers-Danlos',
+    'H-E-D-S': 'hEDS',
+    'H.E.D.S.': 'hEDS',
+    'h eds': 'hEDS',
+    'h-eds': 'hEDS',
+    
+    # POTS variations
+    'P-O-T-S': 'POTS',
+    'P.O.T.S.': 'POTS',
+    'pots syndrome': 'POTS syndrome',
+    'postural orthostatic tachycardia': 'Postural Orthostatic Tachycardia',
+    
+    # CIRS variations
+    'C-I-R-S': 'CIRS',
+    'C.I.R.S.': 'CIRS',
+    'sirs': 'CIRS',  # Context-dependent, but usually means CIRS in this domain
+    
+    # Medical terms
+    'inter leukin': 'interleukin',
+    'interleuken': 'interleukin',
+    'interlukin': 'interleukin',
+    'cyto kines': 'cytokines',
+    'cytokins': 'cytokines',
+    'hista mine': 'histamine',
+    'histomine': 'histamine',
+    'anti histamine': 'antihistamine',
+    'antihistomine': 'antihistamine',
+    'dys autonomia': 'dysautonomia',
+    'disautonomia': 'dysautonomia',
+    'gastro paresis': 'gastroparesis',
+    'gastro-paresis': 'gastroparesis',
+    'sigh bo': 'SIBO',
+    'see bo': 'SIBO',
+    'si bo': 'SIBO',
+    'sub luxation': 'subluxation',
+    'sub-luxation': 'subluxation',
+    'hyper mobility': 'hypermobility',
+    'hyper-mobility': 'hypermobility',
+    'hyper mobile': 'hypermobile',
+    'hyper-mobile': 'hypermobile',
+    'trip tase': 'tryptase',
+    'triptase': 'tryptase',
+    'cromo lyn': 'cromolyn',
+    'chromolyn': 'cromolyn',
+    'keto tifen': 'ketotifen',
+    'famota dine': 'famotidine',
+    'famotadine': 'famotidine',
+    'cet irizine': 'cetirizine',
+    'cetirazine': 'cetirizine',
+    'quer cetin': 'quercetin',
+    'quercitin': 'quercetin',
+    'fluda cortisone': 'fludrocortisone',
+    'fludracortisone': 'fludrocortisone',
+    'mido drine': 'midodrine',
+    'midodreen': 'midodrine',
+    'pro prio ception': 'proprioception',
+    'propriaception': 'proprioception',
+    'sin cope': 'syncope',
+    'syncopee': 'syncope',
+    'ortho static': 'orthostatic',
+    'taky cardia': 'tachycardia',
+    'tachy cardia': 'tachycardia',
+    'brady cardia': 'bradycardia',
+    'bradi cardia': 'bradycardia',
+    'fibro myalgia': 'fibromyalgia',
+    'fibromialgia': 'fibromyalgia',
+    'my algic': 'myalgic',
+    'myaligic': 'myalgic',
+    'encephalo myelitis': 'encephalomyelitis',
+    'encephalomialitis': 'encephalomyelitis',
+}
+
+
+def _apply_transcription_corrections(text: str) -> str:
+    """Apply medical terminology corrections to transcribed text."""
+    corrected = text
+    for wrong, right in TRANSCRIPTION_CORRECTIONS.items():
+        # Case-insensitive replacement while preserving surrounding context
+        import re
+        pattern = re.compile(re.escape(wrong), re.IGNORECASE)
+        corrected = pattern.sub(right, corrected)
+    return corrected
+
+
 def _get_author_dir(author: str) -> Path:
     """Get or create a subdirectory for the author/username."""
     if not author:
@@ -154,18 +276,21 @@ class AudioTranscriber:
                 language=language,
                 beam_size=5,
                 temperature=temperature,
+                initial_prompt=MEDICAL_VOCABULARY_PROMPT,
                 **kwargs,
             )
 
             segment_items = []
             text_parts = []
             for segment in segments_iter:
-                text_parts.append(segment.text)
+                # Apply corrections to each segment
+                corrected_text = _apply_transcription_corrections(segment.text)
+                text_parts.append(corrected_text)
                 if save_segments:
                     segment_items.append({
                         'start': float(segment.start),
                         'end': float(segment.end),
-                        'text': segment.text
+                        'text': corrected_text
                     })
 
             text = " ".join(text_parts).strip()
