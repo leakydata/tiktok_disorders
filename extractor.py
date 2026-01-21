@@ -22,7 +22,8 @@ from database import (
     insert_symptom, get_transcript, get_video_by_id,
     insert_claimed_diagnosis, get_diagnoses_by_video,
     calculate_symptom_concordance, insert_treatment,
-    update_comorbidity_pairs, insert_narrative_elements
+    update_comorbidity_pairs, insert_narrative_elements,
+    get_symptoms_by_video
 )
 
 
@@ -576,7 +577,8 @@ Return ONLY the JSON object, no additional text."""
                 'error': str(e)
             }
 
-    def extract_all_combined(self, video_id: int, min_confidence: Optional[float] = None) -> Dict[str, Any]:
+    def extract_all_combined(self, video_id: int, min_confidence: Optional[float] = None,
+                              force: bool = False) -> Dict[str, Any]:
         """
         Extract ALL data in a single API call - optimized for high-capability models.
         
@@ -586,11 +588,24 @@ Return ONLY the JSON object, no additional text."""
         Args:
             video_id: Database ID of the video
             min_confidence: Minimum confidence for symptoms
+            force: If True, re-extract even if symptoms already exist
 
         Returns:
             Combined results
         """
         min_conf = min_confidence if min_confidence is not None else MIN_CONFIDENCE_SCORE
+        
+        # Check if already extracted (skip to avoid duplicates)
+        if not force:
+            existing_symptoms = get_symptoms_by_video(video_id)
+            if existing_symptoms:
+                print(f"Already extracted for video {video_id} ({len(existing_symptoms)} symptoms). Skipping.")
+                return {
+                    'video_id': video_id,
+                    'success': True,
+                    'already_existed': True,
+                    'symptoms_count': len(existing_symptoms)
+                }
         
         # Get transcript
         transcript_data = get_transcript(video_id)
@@ -788,7 +803,8 @@ Return ONLY the JSON object, no additional text."""
             print(f"[ERROR] Combined extraction failed: {e}")
             return {'video_id': video_id, 'success': False, 'error': str(e)}
 
-    def extract_all(self, video_id: int, min_confidence: Optional[float] = None) -> Dict[str, Any]:
+    def extract_all(self, video_id: int, min_confidence: Optional[float] = None,
+                    force: bool = False) -> Dict[str, Any]:
         """
         Extract symptoms, diagnoses, treatments, narrative elements, and calculate concordance.
         
@@ -798,13 +814,26 @@ Return ONLY the JSON object, no additional text."""
         Args:
             video_id: Database ID of the video
             min_confidence: Minimum confidence for symptoms
+            force: If True, re-extract even if data already exists
 
         Returns:
             Combined results with concordance analysis
         """
         # Use combined extraction for capable models (4x faster)
         if self.use_combined_extraction and self.is_high_capability:
-            return self.extract_all_combined(video_id, min_confidence)
+            return self.extract_all_combined(video_id, min_confidence, force=force)
+        
+        # Check if already extracted (skip to avoid duplicates)
+        if not force:
+            existing_symptoms = get_symptoms_by_video(video_id)
+            if existing_symptoms:
+                print(f"Already extracted for video {video_id} ({len(existing_symptoms)} symptoms). Skipping.")
+                return {
+                    'video_id': video_id,
+                    'success': True,
+                    'already_existed': True,
+                    'symptoms_count': len(existing_symptoms)
+                }
         
         # Standard separate extractions for other models
         # Extract symptoms
