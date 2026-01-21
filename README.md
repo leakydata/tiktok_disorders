@@ -49,6 +49,7 @@ The full research protocol, preregistration, and materials are available on OSF:
 - **Cluster Analysis** - K-means/DBSCAN clustering with silhouette validation
 - **Resumable Runs** - Progress tracking allows interrupted runs to be resumed
 - **Duplicate Detection** - Prevents downloading the same video twice
+- **Idempotent Processing** - Safe to re-run; skips already downloaded, transcribed, and extracted videos
 - **Granular Recovery** - Run individual pipeline stages to recover from failures
 - **Crash-Safe Discovery** - URLs saved incrementally to survive interruptions
 - **Organized File Storage** - Audio and transcripts saved in username-based subfolders
@@ -66,18 +67,33 @@ The full research protocol, preregistration, and materials are available on OSF:
 # Install dependencies with uv
 uv sync
 
-# For GPU acceleration (RTX 4090, CUDA 12.1)
-uv sync --group cuda
-
-# Optional: UMAP for dimensionality reduction
-uv sync --extra umap
-
 # Install Playwright browsers for TikTok discovery (one-time)
 uv run playwright install
 
 # Set up environment
 cp .env.example .env
 # Edit .env with your credentials
+```
+
+### GPU Setup (Recommended)
+
+For fast transcription with NVIDIA GPUs:
+
+```powershell
+# Install PyTorch with CUDA 12.1 support
+uv pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu121
+
+# Reinstall ctranslate2 to pick up CUDA
+uv pip install --force-reinstall ctranslate2
+```
+
+This enables GPU-accelerated transcription (10-20x faster than CPU).
+
+### Optional Dependencies
+
+```bash
+# UMAP for dimensionality reduction in analysis
+uv sync --extra umap
 ```
 
 ### FFmpeg Installation
@@ -377,6 +393,21 @@ For each video, the pipeline:
 7. **Concordance Analysis** - Compare reported symptoms vs expected symptoms
 8. **Comorbidity Tracking** - Track condition co-occurrence
 
+### Idempotent Processing (Safe to Re-run)
+
+The pipeline is designed to be safe to re-run without creating duplicates:
+
+| Stage | Behavior |
+|-------|----------|
+| Download | Skips if audio file already exists |
+| Transcribe | Skips if transcript already exists |
+| Extract | Skips if symptoms already extracted |
+
+This means you can:
+- Restart an interrupted pipeline safely
+- Add new URLs to `urls.txt` and re-run (only new videos processed)
+- Re-run after fixing errors without worrying about duplicates
+
 ## Database Schema
 
 ### Core Tables
@@ -425,7 +456,7 @@ ANTHROPIC_MODEL=claude-sonnet-4-20250514
 # Or for local extraction with Ollama
 EXTRACTOR_PROVIDER=ollama
 OLLAMA_URL=http://localhost:11434
-OLLAMA_MODEL=qwen2.5:20b
+OLLAMA_MODEL=gpt-oss:20b
 
 # Transcription
 WHISPER_MODEL=large-v3
@@ -434,6 +465,9 @@ WHISPER_COMPUTE_TYPE=auto  # float16 for GPU, int8 for CPU
 
 # Extraction thresholds
 MIN_CONFIDENCE_SCORE=0.6
+
+# Hugging Face (for faster model downloads)
+HF_TOKEN=hf_...
 ```
 
 ## Running with Ollama (Local LLM)
@@ -601,12 +635,30 @@ If you see `unable to obtain file audio codec with ffprobe`:
 2. Ensure it's in your PATH
 3. Restart your terminal after installation
 
-### CUDA Not Available
-If transcription runs on CPU:
-```bash
-# Reinstall with CUDA support
-rm -rf .venv
-uv sync --group cuda
+### CUDA/GPU Not Available
+
+If you see `Using model: large-v3 on cpu` instead of `cuda`:
+
+```powershell
+# Install PyTorch with CUDA support
+uv pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu121
+
+# Reinstall ctranslate2 (used by faster-whisper)
+uv pip install --force-reinstall ctranslate2
+
+# Verify GPU is detected
+uv run python -c "import torch; print(f'CUDA: {torch.cuda.is_available()}, GPU: {torch.cuda.get_device_name(0) if torch.cuda.is_available() else None}')"
+```
+
+You should see:
+```
+CUDA: True, GPU: NVIDIA GeForce RTX 4090
+```
+
+When running the pipeline, confirm GPU is active:
+```
+Loading Whisper model 'large-v3' on cuda (faster-whisper)...
+Using GPU: NVIDIA GeForce RTX 4090 (24.0 GB)
 ```
 
 ### TikTok Discovery Issues
