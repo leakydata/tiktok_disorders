@@ -308,7 +308,7 @@ class AudioTranscriber:
                 'patience': 1.0,
                 'length_penalty': 1.0,
                 'suppress_tokens': "-1",
-                'initial_prompt': "This is a video about chronic illness, specifically EDS, MCAS, or POTS. The speaker may discuss medical symptoms.",
+                'initial_prompt': MEDICAL_VOCABULARY_PROMPT,
                 'condition_on_previous_text': True,
                 'fp16': self.device == 'cuda',  # Use half precision on GPU for speed
                 'verbose': True,
@@ -317,10 +317,18 @@ class AudioTranscriber:
 
             result = self.model.transcribe(str(audio_path), **transcribe_options)
 
-            # Extract results
-            text = result['text'].strip()
+            # Extract results and apply corrections
+            text = _apply_transcription_corrections(result['text'].strip())
             detected_language = result['language']
-            segments = result.get('segments', []) if save_segments else None
+            
+            # Apply corrections to segments too
+            segments = None
+            if save_segments and result.get('segments'):
+                segments = []
+                for seg in result['segments']:
+                    seg_copy = dict(seg)
+                    seg_copy['text'] = _apply_transcription_corrections(seg['text'])
+                    segments.append(seg_copy)
 
         # Save to file in author subdirectory
         author = video.get('author') or '_unknown'
