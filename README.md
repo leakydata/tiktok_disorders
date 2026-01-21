@@ -784,6 +784,44 @@ https://www.tiktok.com/@user2/video/789
 - Whitespace trimmed
 - Duplicates automatically removed by pipeline
 
+## URL Progress Tracking
+
+The pipeline automatically tracks processed URLs:
+
+| File | Purpose |
+|------|---------|
+| `urls.txt` | Pending URLs to process |
+| `urls_processed.txt` | Successfully processed URLs (with timestamps) |
+
+### How It Works
+
+1. **Pipeline processes URLs** from `urls.txt`
+2. **Successful URLs are moved** to `urls_processed.txt` with timestamp
+3. **Discovery checks both files** to avoid re-discovering processed videos
+4. **Failed URLs stay** in `urls.txt` for retry
+
+### Benefits
+
+- **Track progress**: See how many URLs are pending vs completed
+- **Avoid duplicates**: Discovery won't re-add already processed videos
+- **Easy retry**: Failed URLs remain in `urls.txt` for next run
+- **Clean separation**: Know what's done vs what's pending
+
+### Check Status
+
+```powershell
+# Quick stats
+uv run python -c "from url_manager import get_stats; s = get_stats(); print(f'Pending: {s[\"pending_count\"]}, Processed: {s[\"processed_count\"]}')"
+```
+
+### Disable URL Moving
+
+If you prefer to keep all URLs in `urls.txt`:
+
+```powershell
+uv run python pipeline.py run --urls-file urls.txt --no-move-processed
+```
+
 ## License
 
 This software is provided for research purposes only.

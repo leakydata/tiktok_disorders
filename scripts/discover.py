@@ -55,21 +55,18 @@ def extract_username_from_url(url: str) -> Optional[str]:
 
 
 def load_existing_urls(file_path: Path) -> Set[str]:
-    """Load existing URLs from a file to avoid duplicates."""
-    existing = set()
-    if file_path.exists():
-        with open(file_path, 'r', encoding='utf-8') as f:
-            for line in f:
-                line = line.strip()
-                if line and not line.startswith('#'):
-                    # Strip inline comments
-                    if ' #' in line:
-                        line = line.split(' #', 1)[0].strip()
-                    if ' //' in line:
-                        line = line.split(' //', 1)[0].strip()
-                    if line:
-                        existing.add(line)
-    return existing
+    """
+    Load existing URLs from pending file AND processed file to avoid duplicates.
+    
+    Checks both urls.txt (or specified file) and urls_processed.txt
+    """
+    from url_manager import get_all_known_urls
+    
+    # Get URLs from both pending and processed files
+    pending_file = str(file_path)
+    processed_file = str(file_path.parent / 'urls_processed.txt')
+    
+    return get_all_known_urls(pending_file=pending_file, processed_file=processed_file)
 
 
 def check_url_in_database(url: str) -> bool:

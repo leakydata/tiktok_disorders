@@ -98,4 +98,5 @@ Thumbs.db
 
 # URL files (may contain private video links)
 urls.txt
+urls_processed.txt
 urls*.txt

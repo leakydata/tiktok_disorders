@@ -316,26 +316,11 @@ def read_urls_file(path: str) -> List[str]:
     - Supports comments starting with # or //
     - Trims whitespace
     """
+    from url_manager import read_url_file
     p = Path(path)
     if not p.exists():
         raise FileNotFoundError(f"URLs file not found: {p}")
-
-    urls_out: List[str] = []
-    for raw in p.read_text(encoding='utf-8').splitlines():
-        line = raw.strip()
-        if not line:
-            continue
-        if line.startswith('#') or line.startswith('//'):
-            continue
-        # Allow inline comments: "<url> # comment" or "<url> // comment"
-        if ' #' in line:
-            line = line.split(' #', 1)[0].strip()
-        if ' //' in line:
-            line = line.split(' //', 1)[0].strip()
-        if line:
-            urls_out.append(line)
-
-    return urls_out
+    return read_url_file(path)
 
 
 def merge_and_dedupe_urls(cli_urls: List[str], file_urls: List[str]) -> List[str]:
@@ -360,6 +345,7 @@ def merge_and_dedupe_urls(cli_urls: List[str], file_urls: List[str]) -> List[str
 def cmd_run(args):
     """Handle the 'run' subcommand - full pipeline processing."""
     from database import get_connection
+    from url_manager import mark_urls_as_processed
 
     pipeline = ResearchPipeline(
         whisper_model=args.whisper_model,
@@ -383,6 +369,16 @@ def cmd_run(args):
             return 1
 
         results = pipeline.process_batch(merged_urls, tags=args.tags)
+
+    # Move successfully processed URLs to urls_processed.txt (unless disabled)
+    if not args.no_move_processed:
+        successful_urls = [r['url'] for r in results if r.get('success')]
+        if successful_urls and args.urls_file:
+            moved = mark_urls_as_processed(successful_urls, 
+                                           pending_file=args.urls_file,
+                                           processed_file='urls_processed.txt')
+            if moved > 0:
+                print(f"\nMoved {moved} successfully processed URLs to urls_processed.txt")
 
     print("\n" + json.dumps(results, indent=2, default=str))
     return 0
@@ -730,6 +726,8 @@ Examples:
     run_parser.add_argument('--provider', help='Extractor provider (anthropic or ollama)')
     run_parser.add_argument('--model', help='Extractor model name')
     run_parser.add_argument('--min-confidence', type=float, default=0.6, help='Min symptom confidence')
+    run_parser.add_argument('--no-move-processed', action='store_true',
+                           help='Do not move processed URLs to urls_processed.txt')
     run_parser.add_argument('--no-parallel', action='store_true', help='Disable parallel extraction')
     run_parser.set_defaults(func=cmd_run)
 
