@@ -172,10 +172,11 @@ def update_transcript_in_db(transcript_id: int, new_text: str, model: str):
         cur.execute("""
             UPDATE transcripts 
             SET text = %s, 
-                model = %s,
-                updated_at = CURRENT_TIMESTAMP
+                model_used = %s,
+                word_count = %s,
+                transcribed_at = CURRENT_TIMESTAMP
             WHERE id = %s
-        """, (new_text, model, transcript_id))
+        """, (new_text, model, len(new_text.split()), transcript_id))
         conn.commit()
 
 
