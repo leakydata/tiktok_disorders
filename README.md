@@ -761,6 +761,29 @@ https://www.tiktok.com/@user2/video/789
 
 This software is provided for research purposes only.
 
+## Acknowledgements
+
+This research pipeline was developed through **AI-assisted pair programming** - a collaboration between the researcher and Claude (Anthropic's AI assistant). The entire codebase, from initial concept to production-ready pipeline, was built iteratively through natural language conversation.
+
+### A Note to Fellow Researchers
+
+If you have some programming knowledge but feel overwhelmed by the prospect of building custom research software, consider trying AI-assisted development. This pipeline - with its video scraping, GPU-accelerated transcription, LLM-powered extraction, and PostgreSQL database - was built entirely through conversational pair programming.
+
+You don't need to be a software engineer. You need:
+- A clear research question
+- Basic familiarity with Python (or willingness to learn)
+- The ability to describe what you want in plain language
+- Patience to iterate and refine
+
+Modern AI assistants can help you:
+- Design database schemas for your specific research needs
+- Write scrapers and data collection tools
+- Integrate machine learning models (Whisper, LLMs)
+- Handle edge cases and error recovery
+- Write documentation and tests
+
+The future of research software may not be researchers learning to code alone, but researchers collaborating with AI to build exactly the tools they need.
+
 ## Citation
 
 If you use this pipeline in your research, please cite:
