@@ -1178,6 +1178,85 @@ def get_potential_duplicates(min_similarity: float = 0.7) -> List[Dict[str, Any]
 def insert_treatment(video_id: int, treatment_type: str, treatment_name: str,
                     **kwargs) -> int:
     """Insert a treatment/medication record."""
+    
+    # Normalize treatment_type to allowed values
+    VALID_TREATMENT_TYPES = {'medication', 'supplement', 'therapy', 'lifestyle', 'procedure', 'device', 'other'}
+    TYPE_MAPPINGS = {
+        'diet': 'lifestyle',
+        'food': 'lifestyle',
+        'exercise': 'lifestyle',
+        'sleep': 'lifestyle',
+        'rest': 'lifestyle',
+        'avoidance': 'lifestyle',
+        'elimination': 'lifestyle',
+        'drug': 'medication',
+        'prescription': 'medication',
+        'otc': 'medication',
+        'vitamin': 'supplement',
+        'mineral': 'supplement',
+        'herb': 'supplement',
+        'herbal': 'supplement',
+        'physical_therapy': 'therapy',
+        'pt': 'therapy',
+        'counseling': 'therapy',
+        'cbt': 'therapy',
+        'surgery': 'procedure',
+        'injection': 'procedure',
+        'infusion': 'procedure',
+        'iv': 'procedure',
+        'brace': 'device',
+        'compression': 'device',
+        'mobility_aid': 'device',
+    }
+    
+    normalized_type = treatment_type.lower().strip() if treatment_type else 'other'
+    if normalized_type in TYPE_MAPPINGS:
+        normalized_type = TYPE_MAPPINGS[normalized_type]
+    elif normalized_type not in VALID_TREATMENT_TYPES:
+        normalized_type = 'other'
+    
+    # Normalize effectiveness to allowed values
+    VALID_EFFECTIVENESS = {'very_helpful', 'somewhat_helpful', 'not_helpful', 'made_worse', 'unspecified'}
+    EFFECTIVENESS_MAPPINGS = {
+        'helpful': 'somewhat_helpful',
+        'effective': 'somewhat_helpful',
+        'works': 'somewhat_helpful',
+        'good': 'somewhat_helpful',
+        'great': 'very_helpful',
+        'excellent': 'very_helpful',
+        'amazing': 'very_helpful',
+        'life_changing': 'very_helpful',
+        'lifesaver': 'very_helpful',
+        'bad': 'not_helpful',
+        'useless': 'not_helpful',
+        'didnt_help': 'not_helpful',
+        'no_effect': 'not_helpful',
+        'worse': 'made_worse',
+        'harmful': 'made_worse',
+        'flared': 'made_worse',
+        'flared_harder': 'made_worse',
+        'triggered': 'made_worse',
+        'reaction': 'made_worse',
+        'side_effects': 'made_worse',
+        'unknown': 'unspecified',
+        'unsure': 'unspecified',
+        'mixed': 'unspecified',
+        'varies': 'unspecified',
+        None: 'unspecified',
+        '': 'unspecified',
+    }
+    
+    raw_effectiveness = kwargs.get('effectiveness', 'unspecified')
+    if raw_effectiveness:
+        normalized_effectiveness = raw_effectiveness.lower().strip()
+    else:
+        normalized_effectiveness = 'unspecified'
+    
+    if normalized_effectiveness in EFFECTIVENESS_MAPPINGS:
+        normalized_effectiveness = EFFECTIVENESS_MAPPINGS[normalized_effectiveness]
+    elif normalized_effectiveness not in VALID_EFFECTIVENESS:
+        normalized_effectiveness = 'unspecified'
+    
     with get_connection() as conn:
         cur = conn.cursor()
         cur.execute("""
@@ -1189,9 +1268,9 @@ def insert_treatment(video_id: int, treatment_type: str, treatment_name: str,
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id
         """, (
-            video_id, treatment_type, treatment_name,
+            video_id, normalized_type, treatment_name,
             kwargs.get('dosage'), kwargs.get('frequency'),
-            kwargs.get('effectiveness', 'unspecified'),
+            normalized_effectiveness,
             kwargs.get('side_effects', []),
             kwargs.get('is_current'),
             kwargs.get('target_condition'),
