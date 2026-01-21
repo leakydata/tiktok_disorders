@@ -543,10 +543,12 @@ class AudioTranscriber:
         existing = get_transcript(video_id)
         if existing:
             print(f"✓ Transcript already exists for video {video_id}")
+            text = existing.get('text', '')
             return {
                 'transcript_id': existing['id'],
-                'text': existing['text'],
+                'text': text,
                 'language': existing['language'],
+                'word_count': existing.get('word_count') or len(text.split()),
                 'already_existed': True
             }
 

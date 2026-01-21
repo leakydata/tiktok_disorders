@@ -119,7 +119,7 @@ class ResearchPipeline:
             print(f"\n{'='*80}")
             print(f"✓ Pipeline complete for: {url}")
             print(f"  Downloaded: {download_result['audio_path']}")
-            print(f"  Transcribed: {transcript_result['word_count']} words")
+            print(f"  Transcribed: {transcript_result.get('word_count', 'N/A')} words")
             if transcript_result.get('quality_score'):
                 print(f"  Transcript quality: {transcript_result['quality_score']:.2f}")
             symptoms_data = extraction_result.get('symptoms', {})
@@ -156,6 +156,7 @@ class ResearchPipeline:
         Returns:
             List of processing results
         """
+        print(f"[DEBUG] process_batch called with urls_file={urls_file}")
         # Start or resume a processing run
         if resume_run_id:
             self.current_run_id = resume_run_id
@@ -207,9 +208,12 @@ class ResearchPipeline:
                     update_pipeline_progress(self.current_run_id, url, 'completed',
                                            video_id=result['stages']['download']['video_id'])
                     # Immediately move successful URL to processed file
-                    if urls_file and not getattr(self, '_no_move_processed', False):
+                    no_move = getattr(self, '_no_move_processed', False)
+                    print(f"  [DEBUG] urls_file={urls_file}, no_move={no_move}")
+                    if urls_file and not no_move:
                         from url_manager import mark_urls_as_processed
-                        mark_urls_as_processed([url], pending_file=urls_file)
+                        moved = mark_urls_as_processed([url], pending_file=urls_file)
+                        print(f"  [DEBUG] Moved {moved} URL(s) to urls_processed.txt")
                 else:
                     update_pipeline_progress(self.current_run_id, url, 'failed',
                                            error_message=result.get('error', 'Unknown error'))
