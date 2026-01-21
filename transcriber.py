@@ -41,21 +41,43 @@ MEDICAL_VOCABULARY_PROMPT = """This is a video about chronic illness conditions 
 - Mast Cell Activation Syndrome (MCAS), mast cells, histamine, antihistamines
 - Postural Orthostatic Tachycardia Syndrome (POTS), dysautonomia, orthostatic intolerance
 - Chronic Inflammatory Response Syndrome (CIRS), biotoxin illness, mold illness
+- SIBO (small intestinal bacterial overgrowth), Lyme disease, fibromyalgia, chronic fatigue
 
-Medical terms that may be mentioned: interleukin, cytokines, collagen, connective tissue,
-tryptase, prostaglandins, leukotrienes, immunoglobulin, autoimmune, autonomic nervous system,
-tachycardia, bradycardia, hypermobility, subluxation, dislocation, proprioception,
-gastroparesis, SIBO, small intestinal bacterial overgrowth, Lyme disease, fibromyalgia,
-chronic fatigue syndrome, myalgic encephalomyelitis, brain fog, dysautonomia, syncope,
-presyncope, orthostatic, supine, tilt table test, compression garments, electrolytes,
-IV fluids, saline, midodrine, fludrocortisone, beta blockers, mast cell stabilizers,
-cromolyn, ketotifen, famotidine, cetirizine, quercetin, DAO enzyme, low histamine diet.
+Medications commonly discussed:
+- Biologics: Xolair (omalizumab), Rhapsido (remibrutinib), Dupixent (dupilumab)
+- Mast cell stabilizers: cromolyn, Gastrocrom, ketotifen, Zaditen
+- H1 antihistamines: cetirizine, Zyrtec, loratadine, Claritin, fexofenadine, Allegra, 
+  diphenhydramine, Benadryl, hydroxyzine, Vistaril, Atarax
+- H2 blockers: famotidine, Pepcid, ranitidine, Zantac
+- POTS medications: fludrocortisone, Florinef, midodrine, pyridostigmine, Mestinon,
+  ivabradine, Corlanor, droxidopa, Northera, propranolol, metoprolol
+- GI medications: low dose naltrexone (LDN), omeprazole, Prilosec, ondansetron, Zofran
+- Pain medications: gabapentin, Neurontin, pregabalin, Lyrica, cyclobenzaprine, Flexeril
+- CIRS medications: cholestyramine, Questran, Welchol, VIP nasal spray
+- Supplements: quercetin, DAO enzyme, magnesium glycinate, magnesium threonate, 
+  methylcobalamin, B12, vitamin D, L-theanine, electrolytes, LMNT, Liquid IV
 
-Abbreviations: EDS, hEDS, MCAS, POTS, CIRS, CFS, ME, SIBO, ANS, HR, BP, GI."""
+Medical devices and products:
+- Compression: compression stockings, TED hose, Jobst, Sigvaris, abdominal binder
+- Bracing: ring splints, silver ring splints, Oval-8, kinesiology tape, KT Tape
+- Mobility: rollator, wheelchair, forearm crutches, SmartCrutch
+- IV access: port-a-cath, PICC line, IV fluids, saline infusion
+- Monitoring: pulse oximeter, Kardia, AliveCor, Apple Watch
+- Air quality: HEPA filter, Austin Air, IQAir
+
+Medical terms: interleukin, cytokines, tryptase, prostaglandin D2, collagen, connective tissue,
+hypermobility, subluxation, proprioception, gastroparesis, syncope, presyncope, tachycardia,
+bradycardia, orthostatic, Beighton score, tilt table test, brain fog, flare-up, comorbid.
+
+Abbreviations: EDS, hEDS, MCAS, POTS, CIRS, CFS, ME, SIBO, LDN, DAO, IV, BP, HR, GI, PGD2."""
 
 
 # Common transcription errors and their corrections
 TRANSCRIPTION_CORRECTIONS = {
+    # ==========================================================================
+    # CONDITION NAME VARIATIONS
+    # ==========================================================================
+    
     # MCAS variations
     'mass cell': 'mast cell',
     'mass cells': 'mast cells',
@@ -65,6 +87,8 @@ TRANSCRIPTION_CORRECTIONS = {
     'em cass': 'MCAS',
     'emcass': 'MCAS',
     'MCA S': 'MCAS',
+    'MKAS': 'MCAS',
+    'm cast': 'MCAS',
     
     # EDS variations
     'E-D-S': 'EDS',
@@ -73,10 +97,12 @@ TRANSCRIPTION_CORRECTIONS = {
     'ehlers danlos': 'Ehlers-Danlos',
     'ehler-danlos': 'Ehlers-Danlos',
     'eller danlos': 'Ehlers-Danlos',
+    'ehlers-danlos': 'Ehlers-Danlos',
     'H-E-D-S': 'hEDS',
     'H.E.D.S.': 'hEDS',
     'h eds': 'hEDS',
     'h-eds': 'hEDS',
+    'hyper mobile eds': 'hypermobile EDS',
     
     # POTS variations
     'P-O-T-S': 'POTS',
@@ -87,9 +113,265 @@ TRANSCRIPTION_CORRECTIONS = {
     # CIRS variations
     'C-I-R-S': 'CIRS',
     'C.I.R.S.': 'CIRS',
-    'sirs': 'CIRS',  # Context-dependent, but usually means CIRS in this domain
+    'sirs': 'CIRS',
     
-    # Medical terms
+    # ==========================================================================
+    # PRESCRIPTION MEDICATIONS
+    # ==========================================================================
+    
+    # Biologics / Injectables
+    'Zolair': 'Xolair',
+    'zolair': 'Xolair',
+    'zolaire': 'Xolair',
+    'xolaire': 'Xolair',
+    'omaluzimab': 'omalizumab',
+    'omalizimab': 'omalizumab',
+    'wrap seedo': 'Rhapsido',
+    'wrap-seedo': 'Rhapsido',
+    'rapsido': 'Rhapsido',
+    'rap seedo': 'Rhapsido',
+    'rapseedo': 'Rhapsido',
+    'rhapseedo': 'Rhapsido',
+    'rhapsody': 'Rhapsido',
+    'rhapsido': 'Rhapsido',
+    'remibrutinib': 'remibrutinib',
+    'remibritinib': 'remibrutinib',
+    'Dupixent': 'Dupixent',
+    'dupixant': 'Dupixent',
+    'dupilumab': 'dupilumab',
+    'dupilimab': 'dupilumab',
+    
+    # Mast cell stabilizers
+    'cromo lyn': 'cromolyn',
+    'chromolyn': 'cromolyn',
+    'gastrocrom': 'Gastrocrom',
+    'gastro crom': 'Gastrocrom',
+    'keto tifen': 'ketotifen',
+    'ketitifen': 'ketotifen',
+    'zaditen': 'Zaditen',
+    'zaditin': 'Zaditen',
+    
+    # Antihistamines - H1 blockers
+    'cet irizine': 'cetirizine',
+    'cetirazine': 'cetirizine',
+    'zyrtec': 'Zyrtec',
+    'zirtec': 'Zyrtec',
+    'lora tadine': 'loratadine',
+    'loratidine': 'loratadine',
+    'claritin': 'Claritin',
+    'clariton': 'Claritin',
+    'fexo fenadine': 'fexofenadine',
+    'fexofenidine': 'fexofenadine',
+    'allegra': 'Allegra',
+    'alegra': 'Allegra',
+    'diphen hydramine': 'diphenhydramine',
+    'diphenhydromine': 'diphenhydramine',
+    'benadryl': 'Benadryl',
+    'benedryl': 'Benadryl',
+    'hydroxyzine': 'hydroxyzine',
+    'hydroxy zine': 'hydroxyzine',
+    'hydroxazine': 'hydroxyzine',
+    'vistaril': 'Vistaril',
+    'visteril': 'Vistaril',
+    'atarax': 'Atarax',
+    'aterax': 'Atarax',
+    
+    # Antihistamines - H2 blockers
+    'famota dine': 'famotidine',
+    'famotadine': 'famotidine',
+    'pepcid': 'Pepcid',
+    'pepsid': 'Pepcid',
+    'rani tidine': 'ranitidine',
+    'ranitadine': 'ranitidine',
+    'zantac': 'Zantac',
+    'zantec': 'Zantac',
+    
+    # POTS medications
+    'fluda cortisone': 'fludrocortisone',
+    'fludracortisone': 'fludrocortisone',
+    'florinef': 'Florinef',
+    'floranef': 'Florinef',
+    'mido drine': 'midodrine',
+    'midodreen': 'midodrine',
+    'proamatine': 'ProAmatine',
+    'pro amatine': 'ProAmatine',
+    'pyridostigmine': 'pyridostigmine',
+    'pyridostigmin': 'pyridostigmine',
+    'mestinon': 'Mestinon',
+    'mestanon': 'Mestinon',
+    'ivabradine': 'ivabradine',
+    'ivabradeen': 'ivabradine',
+    'corlanor': 'Corlanor',
+    'corlaner': 'Corlanor',
+    'droxidopa': 'droxidopa',
+    'droxadopa': 'droxidopa',
+    'northera': 'Northera',
+    'northara': 'Northera',
+    
+    # Beta blockers
+    'propranolol': 'propranolol',
+    'propanolol': 'propranolol',
+    'metoprolol': 'metoprolol',
+    'metopralol': 'metoprolol',
+    'atenolol': 'atenolol',
+    'atenalol': 'atenolol',
+    
+    # GI medications
+    'low dose naltrexone': 'low dose naltrexone',
+    'LDN': 'LDN',
+    'ldn': 'LDN',
+    'omeprazole': 'omeprazole',
+    'omeprazol': 'omeprazole',
+    'prilosec': 'Prilosec',
+    'prilozec': 'Prilosec',
+    'pantoprazole': 'pantoprazole',
+    'pantoprazol': 'pantoprazole',
+    'protonix': 'Protonix',
+    'protonex': 'Protonix',
+    'ondansetron': 'ondansetron',
+    'ondansetran': 'ondansetron',
+    'zofran': 'Zofran',
+    'zophran': 'Zofran',
+    'dicyclomine': 'dicyclomine',
+    'dicyclomin': 'dicyclomine',
+    'bentyl': 'Bentyl',
+    'bentil': 'Bentyl',
+    
+    # Pain / anti-inflammatory
+    'gabapentin': 'gabapentin',
+    'gabapentine': 'gabapentin',
+    'neurontin': 'Neurontin',
+    'neurotin': 'Neurontin',
+    'pregabalin': 'pregabalin',
+    'pregabaline': 'pregabalin',
+    'lyrica': 'Lyrica',
+    'lirica': 'Lyrica',
+    'tramadol': 'tramadol',
+    'tremadol': 'tramadol',
+    'cyclobenzaprine': 'cyclobenzaprine',
+    'cyclobenzapreen': 'cyclobenzaprine',
+    'flexeril': 'Flexeril',
+    'flexerol': 'Flexeril',
+    
+    # CIRS / mold medications
+    'cholestyramine': 'cholestyramine',
+    'colestyramine': 'cholestyramine',
+    'questran': 'Questran',
+    'questron': 'Questran',
+    'welchol': 'Welchol',
+    'welcol': 'Welchol',
+    'colesevelam': 'colesevelam',
+    'colesevelum': 'colesevelam',
+    'VIP nasal spray': 'VIP nasal spray',
+    'vasoactive intestinal peptide': 'vasoactive intestinal peptide',
+    
+    # ==========================================================================
+    # SUPPLEMENTS
+    # ==========================================================================
+    
+    'quer cetin': 'quercetin',
+    'quercitin': 'quercetin',
+    'quercetine': 'quercetin',
+    'DAO enzyme': 'DAO enzyme',
+    'dao enzyme': 'DAO enzyme',
+    'diamine oxidase': 'diamine oxidase',
+    'diamene oxidase': 'diamine oxidase',
+    'vitamin d': 'vitamin D',
+    'vitamin d3': 'vitamin D3',
+    'b twelve': 'B12',
+    'b-twelve': 'B12',
+    'b 12': 'B12',
+    'methyl b12': 'methyl B12',
+    'methylcobalamin': 'methylcobalamin',
+    'methyl cobalamin': 'methylcobalamin',
+    'magnesium glycinate': 'magnesium glycinate',
+    'magnesium glysinate': 'magnesium glycinate',
+    'magnesium theronate': 'magnesium threonate',
+    'magnesium threonate': 'magnesium threonate',
+    'l-theanine': 'L-theanine',
+    'l theanine': 'L-theanine',
+    'theanine': 'L-theanine',
+    'electrolytes': 'electrolytes',
+    'electrolites': 'electrolytes',
+    'LMNT': 'LMNT',
+    'element electrolytes': 'LMNT',
+    'liquid iv': 'Liquid IV',
+    'liquid i.v.': 'Liquid IV',
+    'drip drop': 'DripDrop',
+    'nuun': 'Nuun',
+    'noon tablets': 'Nuun tablets',
+    
+    # ==========================================================================
+    # MEDICAL DEVICES & PRODUCTS
+    # ==========================================================================
+    
+    # Compression
+    'compression stockings': 'compression stockings',
+    'compression socks': 'compression socks',
+    'ted hose': 'TED hose',
+    'jobst': 'Jobst',
+    'jobest': 'Jobst',
+    'sigvaris': 'Sigvaris',
+    'sigvares': 'Sigvaris',
+    'abdominal binder': 'abdominal binder',
+    'abdominal compression': 'abdominal compression',
+    
+    # Bracing / support
+    'ring splints': 'ring splints',
+    'silver ring splints': 'silver ring splints',
+    'oval 8': 'Oval-8',
+    'oval eight': 'Oval-8',
+    'kinesio tape': 'kinesiology tape',
+    'kinesiology tape': 'kinesiology tape',
+    'k tape': 'KT Tape',
+    'kt tape': 'KT Tape',
+    'rock tape': 'RockTape',
+    
+    # Mobility aids
+    'rollator': 'rollator',
+    'rolator': 'rollator',
+    'wheelchair': 'wheelchair',
+    'wheel chair': 'wheelchair',
+    'walking cane': 'walking cane',
+    'forearm crutches': 'forearm crutches',
+    'smart crutch': 'SmartCrutch',
+    
+    # IV / infusion
+    'IV fluids': 'IV fluids',
+    'i.v. fluids': 'IV fluids',
+    'saline infusion': 'saline infusion',
+    'normal saline': 'normal saline',
+    'lactated ringers': "lactated Ringer's",
+    'ringers lactate': "Ringer's lactate",
+    'port-a-cath': 'port-a-cath',
+    'port a cath': 'port-a-cath',
+    'PICC line': 'PICC line',
+    'pick line': 'PICC line',
+    'pic line': 'PICC line',
+    
+    # Monitoring devices
+    'pulse oximeter': 'pulse oximeter',
+    'pulse ox': 'pulse ox',
+    'blood pressure cuff': 'blood pressure cuff',
+    'bp cuff': 'BP cuff',
+    'heart rate monitor': 'heart rate monitor',
+    'apple watch': 'Apple Watch',
+    'kardia': 'Kardia',
+    'cardia': 'Kardia',
+    'alivecor': 'AliveCor',
+    
+    # Allergy / environmental
+    'air purifier': 'air purifier',
+    'HEPA filter': 'HEPA filter',
+    'hepa filter': 'HEPA filter',
+    'austin air': 'Austin Air',
+    'intellipure': 'Intellipure',
+    'iqair': 'IQAir',
+    
+    # ==========================================================================
+    # MEDICAL TERMS
+    # ==========================================================================
+    
     'inter leukin': 'interleukin',
     'interleuken': 'interleukin',
     'interlukin': 'interleukin',
@@ -106,6 +388,7 @@ TRANSCRIPTION_CORRECTIONS = {
     'sigh bo': 'SIBO',
     'see bo': 'SIBO',
     'si bo': 'SIBO',
+    'S-I-B-O': 'SIBO',
     'sub luxation': 'subluxation',
     'sub-luxation': 'subluxation',
     'hyper mobility': 'hypermobility',
@@ -114,23 +397,12 @@ TRANSCRIPTION_CORRECTIONS = {
     'hyper-mobile': 'hypermobile',
     'trip tase': 'tryptase',
     'triptase': 'tryptase',
-    'cromo lyn': 'cromolyn',
-    'chromolyn': 'cromolyn',
-    'keto tifen': 'ketotifen',
-    'famota dine': 'famotidine',
-    'famotadine': 'famotidine',
-    'cet irizine': 'cetirizine',
-    'cetirazine': 'cetirizine',
-    'quer cetin': 'quercetin',
-    'quercitin': 'quercetin',
-    'fluda cortisone': 'fludrocortisone',
-    'fludracortisone': 'fludrocortisone',
-    'mido drine': 'midodrine',
-    'midodreen': 'midodrine',
     'pro prio ception': 'proprioception',
     'propriaception': 'proprioception',
     'sin cope': 'syncope',
     'syncopee': 'syncope',
+    'pre syncope': 'presyncope',
+    'pre-syncope': 'presyncope',
     'ortho static': 'orthostatic',
     'taky cardia': 'tachycardia',
     'tachy cardia': 'tachycardia',
@@ -142,6 +414,26 @@ TRANSCRIPTION_CORRECTIONS = {
     'myaligic': 'myalgic',
     'encephalo myelitis': 'encephalomyelitis',
     'encephalomialitis': 'encephalomyelitis',
+    'chronic fatigue': 'chronic fatigue',
+    'brain fog': 'brain fog',
+    'brainfog': 'brain fog',
+    'flare up': 'flare-up',
+    'flareup': 'flare-up',
+    'co morbid': 'comorbid',
+    'co-morbid': 'comorbid',
+    'comorbidity': 'comorbidity',
+    'co morbidity': 'comorbidity',
+    
+    # Tests
+    'tilt table test': 'tilt table test',
+    'tilt table': 'tilt table',
+    'triptase test': 'tryptase test',
+    'prostaglandin d2': 'prostaglandin D2',
+    'PGD2': 'PGD2',
+    'n-methylhistamine': 'N-methylhistamine',
+    'beighton score': 'Beighton score',
+    'brighton score': 'Beighton score',
+    'bayton score': 'Beighton score',
 }
 
 
