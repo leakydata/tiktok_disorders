@@ -21,6 +21,11 @@ EXTRACTOR_PROVIDER = os.getenv('EXTRACTOR_PROVIDER', 'anthropic')
 ANTHROPIC_MODEL = os.getenv('ANTHROPIC_MODEL', 'claude-opus-4-5-20251101')
 OLLAMA_URL = os.getenv('OLLAMA_URL', 'http://localhost:11434')
 OLLAMA_MODEL = os.getenv('OLLAMA_MODEL', 'gpt-oss:20b')
+HF_TOKEN = os.getenv('HF_TOKEN')
+
+# Set HF_TOKEN in environment for huggingface_hub to find it
+if HF_TOKEN:
+    os.environ['HF_TOKEN'] = HF_TOKEN
 
 # Data Directories
 BASE_DIR = Path(__file__).parent
