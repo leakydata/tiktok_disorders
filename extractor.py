@@ -22,7 +22,7 @@ from database import (
     insert_symptom, get_transcript, get_video_by_id,
     insert_claimed_diagnosis, get_diagnoses_by_video,
     calculate_symptom_concordance, insert_treatment,
-    update_comorbidity_pairs
+    update_comorbidity_pairs, insert_narrative_elements
 )
 
 
@@ -42,22 +42,28 @@ SYMPTOM_CATEGORIES = {
 
 
 class SymptomExtractor:
-    """Extracts symptoms from transcripts using Claude or Ollama."""
+    """Extracts symptoms from transcripts using Claude or Ollama.
+    
+    Optimized for high-performance models like gpt-oss:20b with 128k context
+    and workstation hardware (40 cores, 393GB RAM, RTX 4090).
+    """
 
     def __init__(
         self,
         api_key: Optional[str] = None,
-        max_workers: int = 10,
+        max_workers: int = 20,  # Increased for 40-core workstation
         provider: Optional[str] = None,
         model: Optional[str] = None,
         ollama_url: Optional[str] = None,
+        use_combined_extraction: bool = True,  # Single prompt for all extractions
     ):
         """
         Initialize the symptom extractor.
 
         Args:
             api_key: Anthropic API key (defaults to config.ANTHROPIC_API_KEY)
-            max_workers: Maximum parallel API calls (with 389GB RAM, we can handle many!)
+            max_workers: Maximum parallel API calls (default 20 for workstation)
+            use_combined_extraction: Use single prompt for all extractions (faster)
         """
         self.provider = (provider or EXTRACTOR_PROVIDER).lower()
         if self.provider not in {"anthropic", "ollama"}:
@@ -66,6 +72,7 @@ class SymptomExtractor:
         self.api_key = api_key or ANTHROPIC_API_KEY
         self.model = model or (ANTHROPIC_MODEL if self.provider == "anthropic" else OLLAMA_MODEL)
         self.ollama_url = (ollama_url or OLLAMA_URL).rstrip("/")
+        self.use_combined_extraction = use_combined_extraction
 
         if self.provider == "anthropic":
             if not self.api_key:
@@ -74,6 +81,12 @@ class SymptomExtractor:
         else:
             self.client = None
         self.max_workers = max_workers
+        
+        # Detect if using a high-capability model (gpt-oss, etc.)
+        self.is_high_capability = any(x in self.model.lower() for x in ['gpt-oss', 'qwen2.5:20b', 'llama3:70b', 'mixtral'])
+        if self.is_high_capability:
+            print(f"[OK] High-capability model detected: {self.model}")
+            print(f"    Using combined extraction for efficiency")
 
     def _build_extraction_prompt(self, transcript: str) -> str:
         """Build the prompt for the model to extract symptoms with enhanced research data."""
@@ -249,10 +262,11 @@ Look for mentions of:
 - POTS (Postural Orthostatic Tachycardia Syndrome)
 - Fibromyalgia
 - CFS/ME (Chronic Fatigue Syndrome / Myalgic Encephalomyelitis)
+- CIRS (Chronic Inflammatory Response Syndrome) / Mold illness
 - Any other chronic illnesses mentioned
 
 For each claimed diagnosis, provide:
-1. **condition_code**: Abbreviation (EDS, MCAS, POTS, FIBROMYALGIA, CFS, or OTHER)
+1. **condition_code**: Abbreviation (EDS, MCAS, POTS, FIBROMYALGIA, CFS, CIRS, or OTHER)
 2. **condition_name**: Full name as the speaker calls it
 3. **confidence**: 0.0-1.0 based on how clearly they claim to have it
 4. **is_self_diagnosed**: true if they mention self-diagnosis, false if doctor-diagnosed, null if unclear
@@ -440,9 +454,346 @@ TRANSCRIPT:
                 'error': str(e)
             }
 
+    def extract_narrative_elements(self, video_id: int) -> Dict[str, Any]:
+        """
+        Extract narrative elements for STRAIN framework analysis.
+        
+        Captures self-diagnosis patterns, medical journey narratives,
+        stress-symptom relationships, and social/community influences.
+
+        Args:
+            video_id: Database ID of the video
+
+        Returns:
+            Dictionary with narrative element extraction results
+        """
+        # Get transcript
+        transcript_data = get_transcript(video_id)
+        if not transcript_data:
+            raise ValueError(f"No transcript found for video {video_id}")
+
+        transcript_text = transcript_data['text']
+
+        if len(transcript_text.split()) < 10:
+            return {'video_id': video_id, 'success': False, 'error': 'Transcript too short'}
+
+        print(f"Extracting narrative elements from video {video_id}...")
+
+        prompt = f"""Analyze this transcript for narrative patterns related to chronic illness experiences.
+This is for research on how illness narratives spread on social media.
+
+Extract the following elements:
+
+1. **content_type**: Classify the video as one of:
+   - "personal_story": Sharing personal illness experience
+   - "educational": Teaching/informing about a condition
+   - "advice_giving": Recommending treatments or actions
+   - "awareness_advocacy": Raising awareness about conditions
+   - "product_promotion": Promoting products/services
+   - "vent_rant": Expressing frustration
+   - "other": Doesn't fit above categories
+
+2. **Diagnostic Journey Indicators** (true/false/null if not mentioned):
+   - mentions_self_diagnosis: Do they mention diagnosing themselves?
+   - mentions_professional_diagnosis: Do they mention being diagnosed by a doctor?
+   - mentions_negative_testing: Do they mention tests coming back normal/negative?
+   - mentions_doctor_dismissal: Do they mention doctors not believing them or dismissing symptoms?
+   - mentions_medical_gaslighting: Do they use terms like "medical gaslighting" or describe being told it's "in their head"?
+   - mentions_long_diagnostic_journey: Do they mention taking years to get diagnosed or seeing many doctors?
+   - mentions_multiple_doctors: Do they mention seeing multiple doctors for diagnosis?
+   - years_to_diagnosis_mentioned: If they mention how long diagnosis took, what number? (null if not mentioned)
+
+3. **Stress-Symptom Relationship** (true/false/null):
+   - mentions_stress_triggers: Do they mention stress causing or worsening symptoms?
+   - mentions_symptom_flares: Do they mention symptom flares or episodes?
+   - mentions_symptom_migration: Do they mention symptoms moving between body systems?
+
+4. **Social/Community Influence** (true/false/null):
+   - mentions_online_community: Do they reference online chronic illness communities?
+   - mentions_other_creators: Do they mention other TikTok creators or influencers?
+   - mentions_learning_from_tiktok: Do they mention learning about their condition from TikTok/social media?
+   - cites_medical_sources: Do they cite doctors, studies, or medical sources?
+
+5. **Authority Claims** (true/false/null):
+   - claims_healthcare_background: Do they claim to work in healthcare?
+   - claims_expert_knowledge: Do they position themselves as an expert?
+
+6. **Illness Identity** (true/false/null):
+   - uses_condition_as_identity: Do they use phrases like "as a POTS patient" or "we spoonies"?
+   - mentions_chronic_illness_community: Do they reference the chronic illness community?
+
+7. **Key Quotes** (arrays of relevant quotes, max 3 each):
+   - diagnostic_journey_quotes: Quotes about their diagnostic experience
+   - stress_trigger_quotes: Quotes about stress and symptoms
+
+Return a JSON object with all fields. Use null for fields where the transcript provides no information.
+
+TRANSCRIPT:
+{transcript_text}
+
+Return ONLY the JSON object, no additional text."""
+
+        try:
+            response_text = self._call_model(prompt)
+
+            # Extract JSON
+            if '```json' in response_text:
+                response_text = response_text.split('```json')[1].split('```')[0].strip()
+            elif '```' in response_text:
+                response_text = response_text.split('```')[1].split('```')[0].strip()
+
+            elements = json.loads(response_text)
+
+            # Add metadata
+            elements['extractor_model'] = self.model
+            elements['extractor_provider'] = self.provider
+            elements['confidence'] = 0.7  # Default confidence for narrative extraction
+
+            # Save to database
+            insert_narrative_elements(video_id, elements)
+
+            # Count how many indicators were found
+            indicators_found = sum(1 for k, v in elements.items() 
+                                   if isinstance(v, bool) and v is True)
+
+            print(f"[OK] Extracted narrative elements: {indicators_found} indicators, type: {elements.get('content_type', 'unknown')}")
+
+            return {
+                'video_id': video_id,
+                'content_type': elements.get('content_type'),
+                'indicators_found': indicators_found,
+                'mentions_self_diagnosis': elements.get('mentions_self_diagnosis'),
+                'mentions_doctor_dismissal': elements.get('mentions_doctor_dismissal'),
+                'mentions_stress_triggers': elements.get('mentions_stress_triggers'),
+                'success': True
+            }
+
+        except Exception as e:
+            print(f"[ERROR] Error extracting narrative elements: {e}")
+            return {
+                'video_id': video_id,
+                'success': False,
+                'error': str(e)
+            }
+
+    def extract_all_combined(self, video_id: int, min_confidence: Optional[float] = None) -> Dict[str, Any]:
+        """
+        Extract ALL data in a single API call - optimized for high-capability models.
+        
+        Uses the full 128k context window to extract symptoms, diagnoses, treatments,
+        and narrative elements in one prompt. 4x more efficient than separate calls.
+
+        Args:
+            video_id: Database ID of the video
+            min_confidence: Minimum confidence for symptoms
+
+        Returns:
+            Combined results
+        """
+        min_conf = min_confidence if min_confidence is not None else MIN_CONFIDENCE_SCORE
+        
+        # Get transcript
+        transcript_data = get_transcript(video_id)
+        if not transcript_data:
+            raise ValueError(f"No transcript found for video {video_id}")
+
+        transcript_text = transcript_data['text']
+        
+        if len(transcript_text.split()) < 20:
+            return {'video_id': video_id, 'success': False, 'error': 'Transcript too short'}
+
+        print(f"Extracting all data from video {video_id} ({len(transcript_text)} chars) [COMBINED MODE]...")
+
+        categories_str = "\n".join([f"- {cat}: {desc}" for cat, desc in SYMPTOM_CATEGORIES.items()])
+
+        prompt = f"""You are a medical research assistant analyzing TikTok content about chronic illnesses for the STRAIN research framework.
+
+Analyze this transcript and extract ALL of the following in a single JSON response:
+
+## 1. SYMPTOMS
+For each symptom mentioned, provide:
+- symptom: Brief description
+- category: One of: {', '.join(SYMPTOM_CATEGORIES.keys())}
+- confidence: 0.0-1.0 (1.0 = explicitly stated personal experience)
+- severity: "mild", "moderate", "severe", or "unspecified"
+- temporal_pattern: "acute", "chronic", "intermittent", "progressive", or "unspecified"
+- body_location: Specific body part if mentioned
+- triggers: Array of triggers if mentioned
+- is_personal_experience: true/false
+- context: Relevant quote
+
+## 2. DIAGNOSES
+Medical conditions the speaker claims to have:
+- condition_code: EDS, MCAS, POTS, FIBROMYALGIA, CFS, CIRS, or OTHER
+- condition_name: Full name as speaker calls it
+- confidence: 0.0-1.0
+- is_self_diagnosed: true/false/null
+- diagnosis_date_mentioned: Year/date if mentioned
+- context: Quote where they claim this diagnosis
+
+## 3. TREATMENTS
+Medications, supplements, therapies mentioned:
+- treatment_type: "medication", "supplement", "therapy", "lifestyle", "procedure", "device", "other"
+- treatment_name: Name of treatment
+- dosage: If mentioned
+- effectiveness: "very_helpful", "somewhat_helpful", "not_helpful", "made_worse", "unspecified"
+- side_effects: Array
+- target_condition: What it's for
+- context: Quote
+- confidence: 0.0-1.0
+
+## 4. NARRATIVE ELEMENTS (for STRAIN framework analysis)
+- content_type: "personal_story", "educational", "advice_giving", "awareness_advocacy", "product_promotion", "vent_rant", "other"
+- mentions_self_diagnosis: true/false/null
+- mentions_professional_diagnosis: true/false/null
+- mentions_negative_testing: true/false/null (tests came back normal)
+- mentions_doctor_dismissal: true/false/null (doctors didn't believe them)
+- mentions_medical_gaslighting: true/false/null
+- mentions_long_diagnostic_journey: true/false/null
+- mentions_multiple_doctors: true/false/null
+- years_to_diagnosis_mentioned: number or null
+- mentions_stress_triggers: true/false/null
+- mentions_symptom_flares: true/false/null
+- mentions_symptom_migration: true/false/null (symptoms moving between systems)
+- mentions_online_community: true/false/null
+- mentions_other_creators: true/false/null
+- mentions_learning_from_tiktok: true/false/null
+- cites_medical_sources: true/false/null
+- claims_healthcare_background: true/false/null
+- uses_condition_as_identity: true/false/null
+- diagnostic_journey_quotes: Array of max 3 quotes
+- stress_trigger_quotes: Array of max 3 quotes
+
+Return a single JSON object with this structure:
+{{
+  "symptoms": [...],
+  "diagnoses": [...],
+  "treatments": [...],
+  "narrative": {{...}}
+}}
+
+TRANSCRIPT:
+{transcript_text}
+
+Return ONLY the JSON object, no additional text."""
+
+        try:
+            response_text = self._call_model(prompt)
+
+            # Extract JSON
+            if '```json' in response_text:
+                response_text = response_text.split('```json')[1].split('```')[0].strip()
+            elif '```' in response_text:
+                response_text = response_text.split('```')[1].split('```')[0].strip()
+
+            data = json.loads(response_text)
+
+            # Process symptoms
+            symptoms_saved = 0
+            for symptom_data in data.get('symptoms', []):
+                confidence = symptom_data.get('confidence', 0.0)
+                if confidence >= min_conf:
+                    insert_symptom(
+                        video_id=video_id,
+                        category=symptom_data.get('category', 'other'),
+                        symptom=symptom_data['symptom'],
+                        confidence=confidence,
+                        context=symptom_data.get('context'),
+                        severity=symptom_data.get('severity', 'unspecified'),
+                        temporal_pattern=symptom_data.get('temporal_pattern', 'unspecified'),
+                        body_location=symptom_data.get('body_location'),
+                        triggers=symptom_data.get('triggers', []),
+                        is_personal_experience=symptom_data.get('is_personal_experience', True),
+                        extractor_model=self.model,
+                        extractor_provider=self.provider
+                    )
+                    symptoms_saved += 1
+
+            # Process diagnoses
+            diagnosis_ids = []
+            for diag in data.get('diagnoses', []):
+                if diag.get('confidence', 0) >= 0.5:
+                    diag_id = insert_claimed_diagnosis(
+                        video_id=video_id,
+                        condition_code=diag.get('condition_code', 'OTHER'),
+                        condition_name=diag.get('condition_name', 'Unknown'),
+                        confidence=diag.get('confidence', 0.5),
+                        context=diag.get('context'),
+                        is_self_diagnosed=diag.get('is_self_diagnosed'),
+                        diagnosis_date_mentioned=diag.get('diagnosis_date_mentioned'),
+                        extractor_model=self.model,
+                        extractor_provider=self.provider
+                    )
+                    diagnosis_ids.append(diag_id)
+
+            # Process treatments
+            treatments_saved = 0
+            for treatment in data.get('treatments', []):
+                if treatment.get('confidence', 0) >= 0.4:
+                    insert_treatment(
+                        video_id=video_id,
+                        treatment_type=treatment.get('treatment_type', 'other'),
+                        treatment_name=treatment.get('treatment_name', 'Unknown'),
+                        dosage=treatment.get('dosage'),
+                        frequency=treatment.get('frequency'),
+                        effectiveness=treatment.get('effectiveness', 'unspecified'),
+                        side_effects=treatment.get('side_effects', []),
+                        is_current=treatment.get('is_current'),
+                        target_condition=treatment.get('target_condition'),
+                        target_symptoms=treatment.get('target_symptoms', []),
+                        context=treatment.get('context'),
+                        confidence=treatment.get('confidence', 0.5),
+                        extractor_model=self.model,
+                        extractor_provider=self.provider
+                    )
+                    treatments_saved += 1
+
+            # Process narrative elements
+            narrative = data.get('narrative', {})
+            narrative['extractor_model'] = self.model
+            narrative['extractor_provider'] = self.provider
+            narrative['confidence'] = 0.7
+            insert_narrative_elements(video_id, narrative)
+
+            # Calculate concordance
+            concordance_results = []
+            for diag_id in diagnosis_ids:
+                try:
+                    concordance = calculate_symptom_concordance(video_id, diag_id, self.model)
+                    concordance_results.append(concordance)
+                except Exception as e:
+                    pass
+
+            # Update comorbidity pairs
+            if len(diagnosis_ids) >= 2:
+                try:
+                    update_comorbidity_pairs(video_id)
+                except Exception:
+                    pass
+
+            print(f"[OK] Extracted: {symptoms_saved} symptoms, {len(diagnosis_ids)} diagnoses, "
+                  f"{treatments_saved} treatments, narrative:{narrative.get('content_type', 'unknown')}")
+
+            return {
+                'video_id': video_id,
+                'symptoms': {'symptoms_saved': symptoms_saved, 'success': True},
+                'diagnoses': {'diagnoses_saved': len(diagnosis_ids), 'diagnosis_ids': diagnosis_ids, 'success': True},
+                'treatments': {'treatments_saved': treatments_saved, 'success': True},
+                'narrative': {'content_type': narrative.get('content_type'), 'success': True},
+                'concordance': concordance_results,
+                'success': True
+            }
+
+        except Exception as e:
+            print(f"[ERROR] Combined extraction failed: {e}")
+            return {'video_id': video_id, 'success': False, 'error': str(e)}
+
     def extract_all(self, video_id: int, min_confidence: Optional[float] = None) -> Dict[str, Any]:
         """
-        Extract symptoms, diagnoses, treatments, and calculate concordance for a video.
+        Extract symptoms, diagnoses, treatments, narrative elements, and calculate concordance.
+        
+        Uses combined extraction for high-capability models (1 API call),
+        or separate extractions for standard models (4 API calls).
 
         Args:
             video_id: Database ID of the video
@@ -451,6 +802,11 @@ TRANSCRIPT:
         Returns:
             Combined results with concordance analysis
         """
+        # Use combined extraction for capable models (4x faster)
+        if self.use_combined_extraction and self.is_high_capability:
+            return self.extract_all_combined(video_id, min_confidence)
+        
+        # Standard separate extractions for other models
         # Extract symptoms
         symptom_result = self.extract_symptoms(video_id, min_confidence)
 
@@ -459,6 +815,9 @@ TRANSCRIPT:
 
         # Extract treatments
         treatment_result = self.extract_treatments(video_id)
+
+        # Extract narrative elements for STRAIN analysis
+        narrative_result = self.extract_narrative_elements(video_id)
 
         # Calculate concordance for each diagnosis
         concordance_results = []
@@ -485,6 +844,7 @@ TRANSCRIPT:
             'symptoms': symptom_result,
             'diagnoses': diagnosis_result,
             'treatments': treatment_result,
+            'narrative': narrative_result,
             'concordance': concordance_results,
             'success': symptom_result.get('success', False) and diagnosis_result.get('success', False)
         }
@@ -502,14 +862,21 @@ TRANSCRIPT:
             )
             return response.content[0].text.strip()
 
+        # Longer timeout for large models like gpt-oss:20b with complex prompts
+        timeout = 300 if self.is_high_capability else 120
+        
         response = requests.post(
             f"{self.ollama_url}/api/chat",
             json={
                 "model": self.model,
                 "messages": [{"role": "user", "content": prompt}],
                 "stream": False,
+                "options": {
+                    "num_ctx": 32768,  # Use larger context for combined prompts
+                    "num_predict": 8192,  # Allow longer responses
+                }
             },
-            timeout=120,
+            timeout=timeout,
         )
         response.raise_for_status()
         payload = response.json()

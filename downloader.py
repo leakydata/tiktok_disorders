@@ -61,6 +61,30 @@ class VideoDownloader:
         author_dir.mkdir(parents=True, exist_ok=True)
         return author_dir
 
+    def _calculate_creator_tier(self, follower_count: int) -> str:
+        """
+        Calculate creator influence tier based on follower count.
+        
+        Tiers for STRAIN social contagion analysis:
+        - nano: <10K followers (small personal accounts)
+        - micro: 10K-100K (growing influence)
+        - mid: 100K-500K (significant reach)
+        - macro: 500K-1M (major influencer)
+        - mega: >1M (celebrity-level reach)
+        """
+        if not follower_count:
+            return None
+        if follower_count < 10_000:
+            return 'nano'
+        elif follower_count < 100_000:
+            return 'micro'
+        elif follower_count < 500_000:
+            return 'mid'
+        elif follower_count < 1_000_000:
+            return 'macro'
+        else:
+            return 'mega'
+
     def get_video_info(self, url: str) -> Dict[str, Any]:
         """
         Retrieve video metadata without downloading.
@@ -88,15 +112,24 @@ class VideoDownloader:
                 except (ValueError, TypeError):
                     pass
 
+            # Get follower count and calculate creator tier
+            follower_count = info.get('channel_follower_count') or info.get('uploader_follower_count')
+            creator_tier = self._calculate_creator_tier(follower_count)
+            
             return {
                 'video_id': info.get('id'),
                 'title': info.get('title'),
                 'author': info.get('uploader') or info.get('channel'),
+                'author_id': info.get('uploader_id') or info.get('channel_id'),
+                'author_follower_count': follower_count,
+                'creator_tier': creator_tier,
                 'duration': info.get('duration'),  # in seconds
                 'upload_date': upload_date,
                 'description': info.get('description'),
                 'view_count': info.get('view_count'),
                 'like_count': info.get('like_count'),
+                'comment_count': info.get('comment_count'),
+                'share_count': info.get('repost_count'),  # TikTok calls it repost
                 'platform': self._get_platform(url),
             }
 
@@ -179,12 +212,20 @@ class VideoDownloader:
 
         file_size = output_path.stat().st_size
 
-        # Store in database
+        # Store in database with full metadata
         metadata = {
             'title': info['title'],
             'author': info['author'],
+            'author_id': info.get('author_id'),
+            'author_follower_count': info.get('author_follower_count'),
+            'creator_tier': info.get('creator_tier'),
             'duration': info['duration'],
             'upload_date': info['upload_date'],
+            'description': info.get('description'),
+            'view_count': info.get('view_count'),
+            'like_count': info.get('like_count'),
+            'comment_count': info.get('comment_count'),
+            'share_count': info.get('share_count'),
             'tags': tags or [],
             'audio_path': str(output_path),
             'audio_size_bytes': file_size

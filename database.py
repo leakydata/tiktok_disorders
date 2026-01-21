@@ -563,14 +563,16 @@ def insert_video(url: str, platform: str, video_id: str, metadata: Dict[str, Any
                 url, platform, video_id, title, author, author_id, author_follower_count,
                 duration, upload_date, tags, hashtags, description, audio_path, audio_size_bytes,
                 view_count, like_count, comment_count, share_count,
-                collection_method, collection_version, is_verified_creator, research_notes
+                collection_method, collection_version, is_verified_creator, research_notes,
+                creator_tier
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (url) DO UPDATE SET
                 title = COALESCE(EXCLUDED.title, videos.title),
                 author = COALESCE(EXCLUDED.author, videos.author),
                 duration = COALESCE(EXCLUDED.duration, videos.duration),
                 audio_path = COALESCE(EXCLUDED.audio_path, videos.audio_path),
+                creator_tier = COALESCE(EXCLUDED.creator_tier, videos.creator_tier),
                 updated_at = CURRENT_TIMESTAMP
             RETURNING id
         """, (
@@ -583,7 +585,8 @@ def insert_video(url: str, platform: str, video_id: str, metadata: Dict[str, Any
             metadata.get('view_count'), metadata.get('like_count'),
             metadata.get('comment_count'), metadata.get('share_count'),
             metadata.get('collection_method', 'yt-dlp'), metadata.get('collection_version'),
-            metadata.get('is_verified_creator'), metadata.get('research_notes')
+            metadata.get('is_verified_creator'), metadata.get('research_notes'),
+            metadata.get('creator_tier')
         ))
         return cur.fetchone()[0]
 

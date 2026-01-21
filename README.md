@@ -40,7 +40,9 @@ The full research protocol, preregistration, and materials are available on OSF:
 - **Video Discovery** - Find ALL videos from user profiles with date filtering
 - **Video Download** - Download from TikTok, YouTube, and other platforms via yt-dlp
 - **GPU-Accelerated Transcription** - Whisper large-v3 on CUDA (optimized for RTX 4090)
-- **AI-Powered Extraction** - Extract symptoms, diagnoses, and treatments using Claude or Ollama
+- **AI-Powered Extraction** - Extract symptoms, diagnoses, treatments, and narrative elements using Claude or Ollama
+- **STRAIN Framework Support** - Captures self-diagnosis patterns, doctor dismissal mentions, stress triggers, and social media influence
+- **Creator Tier Analysis** - Automatically categorizes creators by influence (nano to mega based on follower count)
 - **Diagnosis Concordance** - Compare reported symptoms against expected symptoms for claimed conditions
 - **Comorbidity Tracking** - Track which conditions appear together
 - **Treatment Analysis** - Track medications, supplements, therapies with effectiveness ratings
@@ -49,6 +51,7 @@ The full research protocol, preregistration, and materials are available on OSF:
 - **Duplicate Detection** - Prevents downloading the same video twice
 - **Granular Recovery** - Run individual pipeline stages to recover from failures
 - **Crash-Safe Discovery** - URLs saved incrementally to survive interruptions
+- **Organized File Storage** - Audio and transcripts saved in username-based subfolders
 
 ## Requirements
 
@@ -111,6 +114,9 @@ createdb tiktok_disorders
 
 # Initialize schema (creates all tables)
 uv run python scripts/init_db.py
+
+# Reset database (WARNING: deletes all data!)
+uv run python scripts/init_db.py --reset
 ```
 
 ## Video Discovery
@@ -246,12 +252,21 @@ uv run python pipeline.py extract --all --min-confidence 0.8 --provider ollama
 ```bash
 # Show database statistics
 uv run python pipeline.py stats
+
+# Detailed stats with STRAIN indicators, creator tiers, and treatments
 uv run python pipeline.py stats --detailed
 
 # Run clustering analysis
 uv run python pipeline.py analyze
 uv run python pipeline.py analyze --cluster-method dbscan --viz-method tsne
 ```
+
+The `--detailed` stats show:
+- Diagnosis counts and concordance scores
+- STRAIN framework indicators (self-diagnosis %, doctor dismissal mentions, etc.)
+- Creator tier breakdown (how many videos from nano vs mega influencers)
+- Top treatments and effectiveness ratings
+- Comorbidity patterns
 
 ### Generate Reports
 
@@ -365,14 +380,15 @@ For each video, the pipeline:
 ## Database Schema
 
 ### Core Tables
-- `videos` - Video metadata, engagement metrics, author info
+- `videos` - Video metadata, engagement metrics, author info, creator tier
 - `transcripts` - Transcribed text with model provenance
 - `symptoms` - Extracted symptoms with severity, temporal patterns
 - `claimed_diagnoses` - Conditions the speaker claims to have
 - `treatments` - Medications, supplements, therapies mentioned
+- `narrative_elements` - STRAIN framework indicators (self-diagnosis, doctor dismissal, stress triggers, etc.)
 
 ### Analysis Tables
-- `expected_symptoms` - Medical reference data for each condition
+- `expected_symptoms` - Medical reference data for each condition (EDS, MCAS, POTS, CIRS)
 - `symptom_concordance` - How well reported symptoms match expected
 - `comorbidity_pairs` - Which conditions appear together
 - `transcript_quality` - Quality metrics for each transcript
@@ -380,6 +396,18 @@ For each video, the pipeline:
 ### Progress Tables
 - `processing_runs` - Track batch processing runs
 - `pipeline_progress` - Per-URL progress for resumable runs
+
+### Creator Tier Categories
+
+The pipeline automatically categorizes creators by follower count:
+
+| Tier | Followers | Description |
+|------|-----------|-------------|
+| nano | <10K | Small personal accounts |
+| micro | 10K-100K | Growing influence |
+| mid | 100K-500K | Significant reach |
+| macro | 500K-1M | Major influencer |
+| mega | >1M | Celebrity-level reach |
 
 ## Configuration
 
@@ -419,8 +447,8 @@ For local extraction without API costs, use Ollama with a capable model:
 # Download from https://ollama.ai or use winget:
 winget install Ollama.Ollama
 
-# Pull a capable model (20B recommended for medical content)
-ollama pull qwen2.5:20b
+# Pull OpenAI's gpt-oss model (RECOMMENDED - best quality)
+ollama pull gpt-oss:20b
 
 # Start Ollama server (runs in background)
 ollama serve
@@ -429,33 +457,63 @@ ollama serve
 ### Run Pipeline with Ollama
 
 ```powershell
-# Full pipeline with Ollama extraction
-uv run python pipeline.py run --urls-file urls.txt --provider ollama --model qwen2.5:20b --tags EDS MCAS POTS CIRS
+# Full pipeline with gpt-oss:20b (recommended)
+uv run python pipeline.py run --urls-file urls.txt --provider ollama --model gpt-oss:20b --tags EDS MCAS POTS CIRS
 
 # Extract symptoms only (if already downloaded/transcribed)
-uv run python pipeline.py extract --all --provider ollama --model qwen2.5:20b
+uv run python pipeline.py extract --all --provider ollama --model gpt-oss:20b
 ```
 
 ### Recommended Ollama Models
 
-| Model | Size | Quality | Speed |
-|-------|------|---------|-------|
-| `qwen2.5:20b` | 20B | Excellent | Moderate |
-| `qwen2.5:14b` | 14B | Very Good | Fast |
-| `llama3:70b` | 70B | Best | Slow |
-| `mistral:7b` | 7B | Good | Very Fast |
+| Model | Size | Context | Quality | Notes |
+|-------|------|---------|---------|-------|
+| `gpt-oss:20b` | 20B | 128k | **Best** | OpenAI open-weight, optimized for reasoning |
+| `gpt-oss:120b` | 120B | 128k | Excellent | Requires 80GB VRAM |
+| `qwen2.5:20b` | 20B | 32k | Very Good | Good alternative |
+| `llama3:70b` | 70B | 8k | Very Good | Large but shorter context |
 
-For STRAIN validation research, `qwen2.5:20b` offers the best balance of quality and speed.
+### Optimizations for High-Capability Models
+
+When using `gpt-oss:20b` or similar high-capability models, the pipeline automatically:
+
+1. **Combined Extraction** - All data (symptoms, diagnoses, treatments, narrative) extracted in a single API call (4x faster)
+2. **Extended Context** - Uses 32k context window for complex prompts
+3. **Parallel Processing** - 20 concurrent extractions (optimized for multi-core workstations)
+4. **Extended Timeouts** - 5-minute timeout for thorough reasoning
+
+The pipeline detects `gpt-oss`, `qwen2.5:20b`, `llama3:70b`, and `mixtral` as high-capability models.
 
 ## Output
 
 The pipeline generates:
 
 - **Database Records** - All extracted data with full provenance
-- **Audio Files** - MP3 files in `data/audio/`
-- **Transcripts** - JSON files in `data/transcripts/`
+- **Audio Files** - MP3 files organized by username: `data/audio/{username}/`
+- **Transcripts** - JSON files organized by username: `data/transcripts/{username}/`
 - **Visualizations** - Cluster plots in `data/visualizations/`
+- **Reports** - JSON analysis reports in `data/reports/`
 - **CSV Exports** - Symptom data for external analysis in `data/exports/`
+
+### File Organization
+
+Files are organized by TikTok username to keep things manageable:
+
+```
+data/
+  audio/
+    chronicallychillandhot/
+      tiktok_123456_video_title.mp3
+      tiktok_789012_another_video.mp3
+    zebra_warrior/
+      tiktok_345678_my_story.mp3
+  transcripts/
+    chronicallychillandhot/
+      transcript_1_20240120_153000.json
+      transcript_2_20240120_153100.json
+    zebra_warrior/
+      transcript_3_20240120_154000.json
+```
 
 ## Example Output
 
@@ -492,6 +550,47 @@ URLs are saved incrementally after each source (crash-safe)
 
   To resume this run if interrupted: --resume 5
 ################################################################################
+```
+
+### Example Stats Output (with --detailed)
+
+```
+============================================================
+DATABASE STATISTICS
+============================================================
+
+Overview:
+  Videos: 150
+  Transcripts: 148
+  Symptoms: 1,247
+  Diagnoses: 312
+
+Diagnoses by Condition:
+  EDS: 89
+  POTS: 76
+  MCAS: 54
+  CIRS: 23
+
+--- STRAIN Framework Indicators ---
+  Videos analyzed: 148
+  Self-diagnosed: 67
+  Professional diagnosis: 81
+  Doctor dismissal mentioned: 43
+  Medical gaslighting mentioned: 28
+  Long diagnostic journey: 52
+  Stress triggers mentioned: 71
+  Symptom flares mentioned: 89
+  Learned from TikTok: 34
+  Online community mention: 56
+
+Creator Influence Tiers:
+  nano: 78 videos
+  micro: 45 videos
+  mid: 19 videos
+  macro: 6 videos
+  mega: 2 videos
+
+============================================================
 ```
 
 ## Troubleshooting

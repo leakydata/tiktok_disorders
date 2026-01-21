@@ -16,7 +16,7 @@ from database import (
     start_processing_run, complete_processing_run,
     init_pipeline_progress, update_pipeline_progress,
     get_incomplete_urls, get_latest_run_id, get_run_progress_summary,
-    get_treatment_statistics, get_comorbidity_matrix
+    get_treatment_statistics, get_comorbidity_matrix, get_strain_indicators_summary
 )
 import config
 
@@ -602,6 +602,49 @@ def cmd_stats(args):
             print(f"\nComorbidity Pairs:")
             for c in comorbidity[:10]:
                 print(f"  {c['condition_a']} + {c['condition_b']}: {c['video_count']} videos")
+
+        # STRAIN Framework Indicators
+        try:
+            strain_stats = get_strain_indicators_summary()
+            if strain_stats.get('total_analyzed', 0) > 0:
+                print(f"\n--- STRAIN Framework Indicators ---")
+                print(f"  Videos analyzed: {strain_stats['total_analyzed']}")
+                print(f"  Self-diagnosed: {strain_stats.get('self_diagnosed_count', 0)}")
+                print(f"  Professional diagnosis: {strain_stats.get('professionally_diagnosed_count', 0)}")
+                print(f"  Doctor dismissal mentioned: {strain_stats.get('doctor_dismissal_count', 0)}")
+                print(f"  Medical gaslighting mentioned: {strain_stats.get('medical_gaslighting_count', 0)}")
+                print(f"  Long diagnostic journey: {strain_stats.get('long_journey_count', 0)}")
+                print(f"  Stress triggers mentioned: {strain_stats.get('stress_triggers_count', 0)}")
+                print(f"  Symptom flares mentioned: {strain_stats.get('symptom_flares_count', 0)}")
+                print(f"  Learned from TikTok: {strain_stats.get('learned_from_tiktok_count', 0)}")
+                print(f"  Online community mention: {strain_stats.get('online_community_count', 0)}")
+                
+                if strain_stats.get('by_content_type'):
+                    print(f"\n  Content Types:")
+                    for ct in strain_stats['by_content_type']:
+                        print(f"    {ct['content_type']}: {ct['count']}")
+        except Exception as e:
+            pass  # STRAIN stats may not be available yet
+
+        # Creator tier breakdown
+        try:
+            from database import get_connection
+            with get_connection() as conn:
+                cur = conn.cursor()
+                cur.execute("""
+                    SELECT creator_tier, COUNT(*) as count 
+                    FROM videos 
+                    WHERE creator_tier IS NOT NULL 
+                    GROUP BY creator_tier 
+                    ORDER BY count DESC
+                """)
+                tiers = cur.fetchall()
+                if tiers:
+                    print(f"\nCreator Influence Tiers:")
+                    for tier, count in tiers:
+                        print(f"  {tier}: {count} videos")
+        except Exception:
+            pass
 
         # Run status
         run_id = get_latest_run_id()
