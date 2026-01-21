@@ -43,7 +43,8 @@ from extractor import SymptomExtractor
 from config import TRANSCRIPT_DIR
 
 
-def get_videos_with_transcripts(limit: int = None, video_ids: list = None):
+def get_videos_with_transcripts(limit: int = None, video_ids: list = None, 
+                                 start_from: int = None):
     """Get all videos that have transcripts."""
     with get_connection() as conn:
         cur = conn.cursor()
@@ -58,15 +59,26 @@ def get_videos_with_transcripts(limit: int = None, video_ids: list = None):
                 ORDER BY v.id
             """, video_ids)
         else:
-            query = """
+            conditions = []
+            params = []
+            
+            if start_from:
+                conditions.append("v.id >= %s")
+                params.append(start_from)
+            
+            where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+            
+            query = f"""
                 SELECT v.id, v.audio_path, v.author, t.id as transcript_id, t.text
                 FROM videos v
                 JOIN transcripts t ON v.id = t.video_id
+                {where_clause}
                 ORDER BY v.id
             """
             if limit:
                 query += f" LIMIT {limit}"
-            cur.execute(query)
+            
+            cur.execute(query, params)
         
         return cur.fetchall()
 
@@ -322,6 +334,8 @@ def main():
     )
     parser.add_argument('--video-ids', type=int, nargs='+',
                         help='Specific video IDs to reprocess')
+    parser.add_argument('--start-from', type=int,
+                        help='Start from this video ID (skip earlier videos)')
     parser.add_argument('--limit', type=int,
                         help='Limit to first N videos')
     parser.add_argument('--backup', action='store_true',
@@ -352,7 +366,11 @@ def main():
     
     # Get videos to process
     print("\nFinding videos with transcripts...")
-    videos = get_videos_with_transcripts(limit=args.limit, video_ids=args.video_ids)
+    videos = get_videos_with_transcripts(
+        limit=args.limit, 
+        video_ids=args.video_ids,
+        start_from=args.start_from
+    )
     
     if not videos:
         print("No videos found to reprocess.")
