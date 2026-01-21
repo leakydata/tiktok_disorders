@@ -800,6 +800,22 @@ The pipeline automatically tracks processed URLs:
 3. **Discovery checks both files** to avoid re-discovering processed videos
 4. **Failed URLs stay** in `urls.txt` for retry
 
+After each run, you'll see a summary:
+
+```
+URL Processing Summary:
+  Total results: 100
+  Successful: 95
+  Moved to urls_processed.txt: 95
+```
+
+### Features
+
+- **Automatic file creation**: `urls_processed.txt` is created automatically on first use
+- **Smart URL matching**: URLs are normalized (trailing slashes, whitespace) for reliable matching
+- **Always records**: Even URLs not in `urls.txt` (e.g., from command line) are recorded as processed
+- **Timestamped entries**: Each processed URL includes when it was completed
+
 ### Benefits
 
 - **Track progress**: See how many URLs are pending vs completed
@@ -811,6 +827,9 @@ The pipeline automatically tracks processed URLs:
 
 ```powershell
 # Quick stats
+uv run python url_manager.py
+
+# Or programmatically
 uv run python -c "from url_manager import get_stats; s = get_stats(); print(f'Pending: {s[\"pending_count\"]}, Processed: {s[\"processed_count\"]}')"
 ```
 

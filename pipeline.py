@@ -142,7 +142,8 @@ class ResearchPipeline:
         return result
 
     def process_batch(self, urls: List[str], tags: Optional[List[str]] = None,
-                      resume_run_id: Optional[int] = None) -> List[Dict[str, Any]]:
+                      resume_run_id: Optional[int] = None,
+                      urls_file: Optional[str] = None) -> List[Dict[str, Any]]:
         """
         Process multiple URLs through the pipeline with progress tracking.
 
@@ -150,6 +151,7 @@ class ResearchPipeline:
             urls: List of video URLs
             tags: Optional tags for all videos
             resume_run_id: Optional run ID to resume from (for interrupted runs)
+            urls_file: Optional path to urls file (for incremental progress tracking)
 
         Returns:
             List of processing results
@@ -204,6 +206,10 @@ class ResearchPipeline:
                 if result['success']:
                     update_pipeline_progress(self.current_run_id, url, 'completed',
                                            video_id=result['stages']['download']['video_id'])
+                    # Immediately move successful URL to processed file
+                    if urls_file and not getattr(self, '_no_move_processed', False):
+                        from url_manager import mark_urls_as_processed
+                        mark_urls_as_processed([url], pending_file=urls_file)
                 else:
                     update_pipeline_progress(self.current_run_id, url, 'failed',
                                            error_message=result.get('error', 'Unknown error'))
@@ -354,9 +360,11 @@ def cmd_run(args):
         extractor_provider=args.provider,
         extractor_model=args.model
     )
+    pipeline._no_move_processed = args.no_move_processed
 
     if args.resume:
-        results = pipeline.process_batch([], tags=args.tags, resume_run_id=args.resume)
+        results = pipeline.process_batch([], tags=args.tags, resume_run_id=args.resume,
+                                         urls_file=args.urls_file)
     else:
         file_urls: List[str] = []
         if args.urls_file:
@@ -368,22 +376,16 @@ def cmd_run(args):
             print("Error: No URLs provided. Use --urls-file or provide URLs as arguments.")
             return 1
 
-        results = pipeline.process_batch(merged_urls, tags=args.tags)
+        results = pipeline.process_batch(merged_urls, tags=args.tags, urls_file=args.urls_file)
 
-    # Move successfully processed URLs to urls_processed.txt (unless disabled)
-    if not args.no_move_processed and args.urls_file:
+    # Show URL processing summary (URLs are moved incrementally during processing)
+    if args.urls_file:
         successful_urls = [r['url'] for r in results if r.get('success')]
         print(f"\nURL Processing Summary:")
         print(f"  Total results: {len(results)}")
         print(f"  Successful: {len(successful_urls)}")
-        
-        if successful_urls:
-            moved = mark_urls_as_processed(successful_urls, 
-                                           pending_file=args.urls_file,
-                                           processed_file='urls_processed.txt')
-            print(f"  Moved to urls_processed.txt: {moved}")
-            if moved < len(successful_urls):
-                print(f"  (Some URLs may not have been in {args.urls_file} to move)")
+        if not args.no_move_processed:
+            print(f"  URLs moved to urls_processed.txt as they completed")
 
     print("\n" + json.dumps(results, indent=2, default=str))
     return 0
