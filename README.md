@@ -50,6 +50,7 @@ The full research protocol, preregistration, and materials are available on OSF:
 - **Resumable Runs** - Progress tracking allows interrupted runs to be resumed
 - **Duplicate Detection** - Prevents downloading the same video twice
 - **Idempotent Processing** - Safe to re-run; skips already downloaded, transcribed, and extracted videos
+- **Song Lyrics Detection** - Automatically detects and skips song lyrics to avoid wasted extraction
 - **Granular Recovery** - Run individual pipeline stages to recover from failures
 - **Crash-Safe Discovery** - URLs saved incrementally to survive interruptions
 - **Organized File Storage** - Audio and transcripts saved in username-based subfolders
@@ -315,6 +316,7 @@ Reports are saved to `data/reports/` and CSV exports to `data/exports/`.
 | `scripts/discover.py` | Find TikTok videos from users/hashtags |
 | `scripts/init_db.py` | Initialize database schema |
 | `scripts/retranscribe.py` | Re-transcribe and re-extract for consistency |
+| `scripts/detect_song_lyrics.py` | Flag song lyrics transcripts (backfill) |
 
 ## Example Workflows
 
@@ -456,6 +458,76 @@ The extractor automatically normalizes LLM responses to valid database values:
 
 This prevents database constraint errors when the LLM returns creative but non-standard values.
 
+### Song Lyrics Detection
+
+TikTok videos often have songs playing instead of the creator speaking. The pipeline uses **ratio-based scoring** to detect and handle mixed content (videos with both lyrics AND spoken words).
+
+**How it works:**
+1. **Heuristics** - Fast pattern matching estimates lyrics ratio (repetitive phrases, rhyming, medical terms, conversational markers)
+2. **LLM** - Ollama asks "what percentage is song lyrics?" and returns 0-100
+3. **Combined ratio** - Weighted average (LLM 2x weight) produces `song_lyrics_ratio` (0.0-1.0)
+4. **Smart flagging** - `is_song_lyrics = TRUE` only if:
+   - Ratio >= 80% lyrics, AND
+   - Estimated spoken words < 20
+
+This means mixed content (e.g., someone talking over music) is **kept** if there's meaningful spoken content.
+
+**Database columns:**
+| Column | Type | Description |
+|--------|------|-------------|
+| `is_song_lyrics` | BOOLEAN | TRUE = skip for extraction |
+| `song_lyrics_ratio` | FLOAT | 0.0 (pure spoken) to 1.0 (pure lyrics) |
+
+**Automatic detection during pipeline:**
+New videos are automatically checked during extraction. If flagged as song lyrics, extraction is skipped.
+
+**Backfill existing transcripts:**
+```powershell
+# Check statistics (with ratio breakdown)
+uv run python scripts/detect_song_lyrics.py --stats
+
+# Dry run - preview without updating database
+uv run python scripts/detect_song_lyrics.py --dry-run --limit 10
+
+# Dry run with verbose output (see all details)
+uv run python scripts/detect_song_lyrics.py -v --dry-run --limit 5
+
+# Run for real - process all unchecked transcripts
+uv run python scripts/detect_song_lyrics.py
+
+# Process with custom thresholds
+uv run python scripts/detect_song_lyrics.py --lyrics-threshold 0.9 --min-spoken-words 30
+
+# Limit to first 100
+uv run python scripts/detect_song_lyrics.py --limit 100
+
+# Use a specific model
+uv run python scripts/detect_song_lyrics.py --model llama3:8b
+
+# Heuristics only (no LLM, faster but less accurate)
+uv run python scripts/detect_song_lyrics.py --heuristics-only
+```
+
+| Option | Description |
+|--------|-------------|
+| `--stats` | Show detection statistics with ratio breakdown |
+| `--dry-run` | Check transcripts without updating database |
+| `-v, --verbose` | Show detailed logging for each transcript |
+| `--limit N` | Process only first N transcripts |
+| `--model` | Ollama model to use (default: from config) |
+| `--workers N` | Number of parallel workers (default: 4) |
+| `--lyrics-threshold` | Ratio above which to flag (default: 0.8 = 80%) |
+| `--min-spoken-words` | Keep if has this many spoken words (default: 20) |
+| `--heuristics-only` | Skip LLM, use only heuristics |
+
+**SQL to add columns (if upgrading existing database):**
+```sql
+ALTER TABLE transcripts ADD COLUMN is_song_lyrics BOOLEAN DEFAULT NULL;
+ALTER TABLE transcripts ADD COLUMN song_lyrics_ratio REAL DEFAULT NULL;
+CREATE INDEX idx_transcripts_is_song_lyrics ON transcripts(is_song_lyrics);
+CREATE INDEX idx_transcripts_song_lyrics_ratio ON transcripts(song_lyrics_ratio);
+```
+
 ## Pipeline Stages
 
 For each video, the pipeline:
@@ -478,6 +550,7 @@ The pipeline is designed to be safe to re-run without creating duplicates:
 | Download | Skips if audio file already exists |
 | Transcribe | Skips if transcript already exists |
 | Extract | Skips if symptoms already extracted |
+| Extract | Skips if transcript flagged as song lyrics |
 
 This means you can:
 - Restart an interrupted pipeline safely
@@ -488,7 +561,7 @@ This means you can:
 
 ### Core Tables
 - `videos` - Video metadata, engagement metrics, author info, creator tier
-- `transcripts` - Transcribed text with model provenance
+- `transcripts` - Transcribed text with model provenance, song lyrics flag + ratio
 - `symptoms` - Extracted symptoms with severity, temporal patterns
 - `claimed_diagnoses` - Conditions the speaker claims to have
 - `treatments` - Medications, supplements, therapies mentioned

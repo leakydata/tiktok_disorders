@@ -23,7 +23,7 @@ from database import (
     insert_claimed_diagnosis, get_diagnoses_by_video,
     calculate_symptom_concordance, insert_treatment,
     update_comorbidity_pairs, insert_narrative_elements,
-    get_symptoms_by_video
+    get_symptoms_by_video, update_transcript_song_lyrics_flag
 )
 
 
@@ -584,6 +584,9 @@ Return ONLY the JSON object, no additional text."""
         
         Uses the full 128k context window to extract symptoms, diagnoses, treatments,
         and narrative elements in one prompt. 4x more efficient than separate calls.
+        
+        Includes song lyrics detection - if transcript is primarily song lyrics,
+        extraction is skipped and the transcript is flagged.
 
         Args:
             video_id: Database ID of the video
@@ -594,6 +597,21 @@ Return ONLY the JSON object, no additional text."""
             Combined results
         """
         min_conf = min_confidence if min_confidence is not None else MIN_CONFIDENCE_SCORE
+        
+        # Get transcript first to check song lyrics flag
+        transcript_data = get_transcript(video_id)
+        if not transcript_data:
+            raise ValueError(f"No transcript found for video {video_id}")
+        
+        # Check if already marked as song lyrics
+        if transcript_data.get('is_song_lyrics') is True:
+            print(f"⏭ Skipping video {video_id} - already marked as song lyrics")
+            return {
+                'video_id': video_id,
+                'success': True,
+                'skipped': True,
+                'reason': 'song_lyrics'
+            }
         
         # Check if already extracted (skip to avoid duplicates)
         if not force:
@@ -606,11 +624,6 @@ Return ONLY the JSON object, no additional text."""
                     'already_existed': True,
                     'symptoms_count': len(existing_symptoms)
                 }
-        
-        # Get transcript
-        transcript_data = get_transcript(video_id)
-        if not transcript_data:
-            raise ValueError(f"No transcript found for video {video_id}")
 
         transcript_text = transcript_data['text']
         
@@ -622,6 +635,14 @@ Return ONLY the JSON object, no additional text."""
         categories_str = "\n".join([f"- {cat}: {desc}" for cat, desc in SYMPTOM_CATEGORIES.items()])
 
         prompt = f"""You are a medical research assistant analyzing TikTok content about chronic illnesses for the STRAIN research framework.
+
+IMPORTANT FIRST CHECK: Before extracting any data, determine if this transcript is primarily SONG LYRICS rather than spoken content.
+- TikTok videos often play songs in the background instead of the creator speaking
+- Song lyrics typically have repetitive patterns, rhyming structures, and emotional/poetic language
+- If this is primarily song lyrics (>70% of the content), set "is_song_lyrics": true and skip all other extractions
+
+If is_song_lyrics is true, return ONLY: {{"is_song_lyrics": true, "symptoms": [], "diagnoses": [], "treatments": [], "narrative": {{}}}}
+Otherwise, proceed with full extraction below.
 
 Analyze this transcript and extract ALL of the following in a single JSON response:
 
@@ -681,11 +702,15 @@ Medications, supplements, therapies mentioned:
 
 Return a single JSON object with this structure:
 {{
+  "is_song_lyrics": false,
   "symptoms": [...],
   "diagnoses": [...],
   "treatments": [...],
   "narrative": {{...}}
 }}
+
+NOTE: If the transcript is primarily song lyrics, return:
+{{"is_song_lyrics": true, "symptoms": [], "diagnoses": [], "treatments": [], "narrative": {{}}}}
 
 TRANSCRIPT:
 {transcript_text}
@@ -702,6 +727,22 @@ Return ONLY the JSON object, no additional text."""
                 response_text = response_text.split('```')[1].split('```')[0].strip()
 
             data = json.loads(response_text)
+
+            # Check if transcript is song lyrics
+            if data.get('is_song_lyrics') is True:
+                update_transcript_song_lyrics_flag(video_id, True)
+                print(f"🎵 Video {video_id} detected as song lyrics - skipping extraction")
+                return {
+                    'video_id': video_id,
+                    'success': True,
+                    'skipped': True,
+                    'reason': 'song_lyrics',
+                    'is_song_lyrics': True
+                }
+            
+            # Mark as NOT song lyrics (spoken content)
+            if transcript_data.get('is_song_lyrics') is None:
+                update_transcript_song_lyrics_flag(video_id, False)
 
             # Process symptoms
             symptoms_saved = 0
@@ -810,6 +851,8 @@ Return ONLY the JSON object, no additional text."""
         
         Uses combined extraction for high-capability models (1 API call),
         or separate extractions for standard models (4 API calls).
+        
+        Includes song lyrics detection - skips extraction for song lyrics.
 
         Args:
             video_id: Database ID of the video
@@ -822,6 +865,17 @@ Return ONLY the JSON object, no additional text."""
         # Use combined extraction for capable models (4x faster)
         if self.use_combined_extraction and self.is_high_capability:
             return self.extract_all_combined(video_id, min_confidence, force=force)
+        
+        # Check if already marked as song lyrics
+        transcript_data = get_transcript(video_id)
+        if transcript_data and transcript_data.get('is_song_lyrics') is True:
+            print(f"⏭ Skipping video {video_id} - already marked as song lyrics")
+            return {
+                'video_id': video_id,
+                'success': True,
+                'skipped': True,
+                'reason': 'song_lyrics'
+            }
         
         # Check if already extracted (skip to avoid duplicates)
         if not force:
