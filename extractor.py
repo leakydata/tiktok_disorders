@@ -57,6 +57,7 @@ class SymptomExtractor:
         model: Optional[str] = None,
         ollama_url: Optional[str] = None,
         use_combined_extraction: bool = True,  # Single prompt for all extractions
+        max_song_ratio: float = 0.6,  # Skip videos with song_lyrics_ratio >= this
     ):
         """
         Initialize the symptom extractor.
@@ -65,8 +66,10 @@ class SymptomExtractor:
             api_key: Anthropic API key (defaults to config.ANTHROPIC_API_KEY)
             max_workers: Maximum parallel API calls (default 20 for workstation)
             use_combined_extraction: Use single prompt for all extractions (faster)
+            max_song_ratio: Skip videos with song_lyrics_ratio >= this (default 0.6)
         """
         self.provider = (provider or EXTRACTOR_PROVIDER).lower()
+        self.max_song_ratio = max_song_ratio
         if self.provider not in {"anthropic", "ollama"}:
             raise ValueError("provider must be 'anthropic' or 'ollama'")
 
@@ -603,10 +606,10 @@ Return ONLY the JSON object, no additional text."""
         if not transcript_data:
             raise ValueError(f"No transcript found for video {video_id}")
         
-        # Check if already marked as mostly song lyrics (ratio >= 0.8)
+        # Check if song lyrics ratio exceeds threshold
         song_ratio = transcript_data.get('song_lyrics_ratio')
-        if song_ratio is not None and song_ratio >= 0.8:
-            print(f"⏭ Skipping video {video_id} - song lyrics ratio {song_ratio:.0%}")
+        if song_ratio is not None and song_ratio >= self.max_song_ratio:
+            print(f"⏭ Skipping video {video_id} - song lyrics ratio {song_ratio:.0%} >= {self.max_song_ratio:.0%} threshold")
             return {
                 'video_id': video_id,
                 'success': True,
@@ -873,8 +876,8 @@ Return ONLY the JSON object, no additional text."""
         transcript_data = get_transcript(video_id)
         if transcript_data:
             song_ratio = transcript_data.get('song_lyrics_ratio')
-            if song_ratio is not None and song_ratio >= 0.8:
-                print(f"⏭ Skipping video {video_id} - song lyrics ratio {song_ratio:.0%}")
+            if song_ratio is not None and song_ratio >= self.max_song_ratio:
+                print(f"⏭ Skipping video {video_id} - song lyrics ratio {song_ratio:.0%} >= {self.max_song_ratio:.0%} threshold")
                 return {
                     'video_id': video_id,
                     'success': True,

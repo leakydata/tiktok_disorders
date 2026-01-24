@@ -740,6 +740,8 @@ Examples:
     run_parser.add_argument('--no-move-processed', action='store_true',
                            help='Do not move processed URLs to urls_processed.txt')
     run_parser.add_argument('--no-parallel', action='store_true', help='Disable parallel extraction')
+    run_parser.add_argument('--max-song-ratio', type=float, default=0.6,
+                           help='Skip videos with song_lyrics_ratio >= this (default: 0.6)')
     run_parser.set_defaults(func=cmd_run)
 
     # --- download subcommand ---
@@ -764,6 +766,8 @@ Examples:
     ex_parser.add_argument('--model', help='Extractor model name')
     ex_parser.add_argument('--min-confidence', type=float, default=0.6, help='Min symptom confidence')
     ex_parser.add_argument('--no-parallel', action='store_true', help='Disable parallel extraction')
+    ex_parser.add_argument('--max-song-ratio', type=float, default=0.6,
+                           help='Skip videos with song_lyrics_ratio >= this (default: 0.6)')
     ex_parser.set_defaults(func=cmd_extract)
 
     # --- analyze subcommand ---

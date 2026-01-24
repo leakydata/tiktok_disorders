@@ -466,20 +466,24 @@ TikTok videos often have songs playing instead of the creator speaking. The pipe
 1. **Heuristics** - Fast pattern matching estimates lyrics ratio (repetitive phrases, rhyming, medical terms, conversational markers)
 2. **LLM** - Ollama asks "what percentage is song lyrics?" and returns 0-100
 3. **Combined ratio** - Weighted average (LLM 2x weight) produces `song_lyrics_ratio` (0.0-1.0)
-4. **Smart flagging** - `is_song_lyrics = TRUE` only if:
-   - Ratio >= 80% lyrics, AND
-   - Estimated spoken words < 20
+4. **Filter by ratio** - Use SQL to filter: `WHERE song_lyrics_ratio < 0.8` for mostly spoken content
 
-This means mixed content (e.g., someone talking over music) is **kept** if there's meaningful spoken content.
-
-**Database columns:**
+**Database column:**
 | Column | Type | Description |
 |--------|------|-------------|
-| `is_song_lyrics` | BOOLEAN | TRUE = skip for extraction |
 | `song_lyrics_ratio` | FLOAT | 0.0 (pure spoken) to 1.0 (pure lyrics) |
 
+**Ratio categories:**
+| Range | Category | Action |
+|-------|----------|--------|
+| < 0.2 | Pure spoken | Always extract |
+| 0.2-0.5 | Mostly spoken | Extract (some background music) |
+| 0.5-0.8 | Mixed | Consider extracting |
+| >= 0.8 | Mostly lyrics | Skip extraction |
+
 **Automatic detection during pipeline:**
-New videos are automatically checked during extraction. If flagged as song lyrics, extraction is skipped.
+- Extraction automatically skips videos with `song_lyrics_ratio >= 0.8`
+- Run `detect_song_lyrics.py` first to pre-classify before extraction
 
 **Backfill existing transcripts:**
 ```powershell
@@ -494,9 +498,6 @@ uv run python scripts/detect_song_lyrics.py -v --dry-run --limit 5
 
 # Run for real - process all unchecked transcripts
 uv run python scripts/detect_song_lyrics.py
-
-# Process with custom thresholds
-uv run python scripts/detect_song_lyrics.py --lyrics-threshold 0.9 --min-spoken-words 30
 
 # Limit to first 100
 uv run python scripts/detect_song_lyrics.py --limit 100
@@ -516,16 +517,16 @@ uv run python scripts/detect_song_lyrics.py --heuristics-only
 | `--limit N` | Process only first N transcripts |
 | `--model` | Ollama model to use (default: from config) |
 | `--workers N` | Number of parallel workers (default: 4) |
-| `--lyrics-threshold` | Ratio above which to flag (default: 0.8 = 80%) |
-| `--min-spoken-words` | Keep if has this many spoken words (default: 20) |
 | `--heuristics-only` | Skip LLM, use only heuristics |
 
-**SQL to add columns (if upgrading existing database):**
+**SQL to add column (if upgrading existing database):**
 ```sql
-ALTER TABLE transcripts ADD COLUMN is_song_lyrics BOOLEAN DEFAULT NULL;
 ALTER TABLE transcripts ADD COLUMN song_lyrics_ratio REAL DEFAULT NULL;
-CREATE INDEX idx_transcripts_is_song_lyrics ON transcripts(is_song_lyrics);
 CREATE INDEX idx_transcripts_song_lyrics_ratio ON transcripts(song_lyrics_ratio);
+
+-- If you have the old is_song_lyrics column, remove it:
+ALTER TABLE transcripts DROP COLUMN IF EXISTS is_song_lyrics;
+DROP INDEX IF EXISTS idx_transcripts_is_song_lyrics;
 ```
 
 ## Pipeline Stages
@@ -550,7 +551,7 @@ The pipeline is designed to be safe to re-run without creating duplicates:
 | Download | Skips if audio file already exists |
 | Transcribe | Skips if transcript already exists |
 | Extract | Skips if symptoms already extracted |
-| Extract | Skips if transcript flagged as song lyrics |
+| Extract | Skips if song_lyrics_ratio >= 0.8 |
 
 This means you can:
 - Restart an interrupted pipeline safely
@@ -561,7 +562,7 @@ This means you can:
 
 ### Core Tables
 - `videos` - Video metadata, engagement metrics, author info, creator tier
-- `transcripts` - Transcribed text with model provenance, song lyrics flag + ratio
+- `transcripts` - Transcribed text with model provenance, song lyrics ratio
 - `symptoms` - Extracted symptoms with severity, temporal patterns
 - `claimed_diagnoses` - Conditions the speaker claims to have
 - `treatments` - Medications, supplements, therapies mentioned
