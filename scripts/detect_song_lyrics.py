@@ -592,7 +592,9 @@ def main():
         
         # Show updated stats
         stats = get_song_lyrics_stats()
-        print(f"\nUpdated totals: {stats['song_lyrics']} song lyrics, {stats['spoken_content']} spoken content, {stats['unchecked']} remaining")
+        print(f"\nUpdated totals: {stats['checked']} checked, {stats['unchecked']} remaining")
+        if stats.get('avg_ratio') is not None:
+            print(f"  Avg ratio: {stats['avg_ratio']:.0%} | <60%: {stats.get('pure_spoken', 0) + stats.get('mostly_spoken', 0)} | >=60%: {stats.get('mixed', 0) + stats.get('mostly_lyrics', 0)}")
 
 
 if __name__ == '__main__':
