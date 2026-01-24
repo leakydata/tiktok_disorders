@@ -476,14 +476,13 @@ TikTok videos often have songs playing instead of the creator speaking. The pipe
 **Ratio categories:**
 | Range | Category | Default Action |
 |-------|----------|----------------|
-| < 0.2 | Pure spoken | Extract |
-| 0.2-0.33 | Mostly spoken | Extract |
-| >= 0.33 | Mixed/lyrics | Skip (default threshold) |
-| >= 0.5 | Mostly lyrics | Skip (lenient threshold) |
-| >= 0.8 | Pure lyrics | Skip (strict threshold) |
+| < 0.2 | Pure spoken | Extract (default) |
+| >= 0.2 | Has lyrics | Skip (default threshold) |
+| >= 0.5 | Mostly lyrics | Skip |
+| >= 0.8 | Pure lyrics | Skip |
 
 **Automatic detection during pipeline:**
-- Extraction automatically skips videos with `song_lyrics_ratio >= 0.33` (configurable)
+- Extraction automatically skips videos with `song_lyrics_ratio >= 0.2` (configurable)
 - Run `detect_song_lyrics.py` first to pre-classify before extraction
 - Override threshold: `--max-song-ratio 0.5` to be more lenient
 
@@ -553,7 +552,7 @@ The pipeline is designed to be safe to re-run without creating duplicates:
 | Download | Skips if audio file already exists |
 | Transcribe | Skips if transcript already exists |
 | Extract | Skips if symptoms already extracted |
-| Extract | Skips if song_lyrics_ratio >= 0.33 (configurable via --max-song-ratio) |
+| Extract | Skips if song_lyrics_ratio >= 0.2 (configurable via --max-song-ratio) |
 
 This means you can:
 - Restart an interrupted pipeline safely
