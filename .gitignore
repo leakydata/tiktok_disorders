@@ -100,3 +100,6 @@ Thumbs.db
 urls.txt
 urls_processed.txt
 urls*.txt
+
+# UV lock file (regenerated from pyproject.toml)
+uv.lock

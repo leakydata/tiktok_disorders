@@ -474,16 +474,18 @@ TikTok videos often have songs playing instead of the creator speaking. The pipe
 | `song_lyrics_ratio` | FLOAT | 0.0 (pure spoken) to 1.0 (pure lyrics) |
 
 **Ratio categories:**
-| Range | Category | Action |
-|-------|----------|--------|
-| < 0.2 | Pure spoken | Always extract |
-| 0.2-0.5 | Mostly spoken | Extract (some background music) |
-| 0.5-0.8 | Mixed | Consider extracting |
-| >= 0.8 | Mostly lyrics | Skip extraction |
+| Range | Category | Default Action |
+|-------|----------|----------------|
+| < 0.2 | Pure spoken | Extract |
+| 0.2-0.5 | Mostly spoken | Extract |
+| 0.5-0.6 | Mixed | Extract (just under threshold) |
+| >= 0.6 | Mostly lyrics | Skip (default threshold) |
+| >= 0.8 | Pure lyrics | Skip (strict threshold) |
 
 **Automatic detection during pipeline:**
-- Extraction automatically skips videos with `song_lyrics_ratio >= 0.8`
+- Extraction automatically skips videos with `song_lyrics_ratio >= 0.6` (configurable)
 - Run `detect_song_lyrics.py` first to pre-classify before extraction
+- Override threshold: `--max-song-ratio 0.8` to be more lenient
 
 **Backfill existing transcripts:**
 ```powershell
@@ -551,7 +553,7 @@ The pipeline is designed to be safe to re-run without creating duplicates:
 | Download | Skips if audio file already exists |
 | Transcribe | Skips if transcript already exists |
 | Extract | Skips if symptoms already extracted |
-| Extract | Skips if song_lyrics_ratio >= 0.8 |
+| Extract | Skips if song_lyrics_ratio >= 0.6 (configurable via --max-song-ratio) |
 
 This means you can:
 - Restart an interrupted pipeline safely
@@ -646,6 +648,9 @@ uv run python pipeline.py run --urls-file urls.txt --provider ollama --model gpt
 
 # Extract symptoms only (if already downloaded/transcribed)
 uv run python pipeline.py extract --all --provider ollama --model gpt-oss:20b
+
+# Be more lenient with song lyrics (include up to 80% lyrics)
+uv run python pipeline.py extract --all --max-song-ratio 0.8
 ```
 
 ### Recommended Ollama Models

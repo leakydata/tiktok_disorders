@@ -30,7 +30,8 @@ class ResearchPipeline:
                  parallel_extraction: bool = True,
                  extractor_provider: Optional[str] = None,
                  extractor_model: Optional[str] = None,
-                 ollama_url: Optional[str] = None):
+                 ollama_url: Optional[str] = None,
+                 max_song_ratio: float = 0.6):
         """
         Initialize the pipeline.
 
@@ -38,6 +39,7 @@ class ResearchPipeline:
             whisper_model: Whisper model for transcription (use large-v3 for RTX 4090)
             min_confidence: Minimum confidence score for symptoms
             parallel_extraction: Enable parallel symptom extraction
+            max_song_ratio: Skip videos with song_lyrics_ratio >= this (default 0.6)
         """
         self.downloader = VideoDownloader()
         self.transcriber = AudioTranscriber(model_size=whisper_model)
@@ -46,6 +48,7 @@ class ResearchPipeline:
             provider=extractor_provider,
             model=extractor_model,
             ollama_url=ollama_url,
+            max_song_ratio=max_song_ratio,
         )
         self.analyzer = SymptomAnalyzer(min_confidence=min_confidence)
 
@@ -362,7 +365,8 @@ def cmd_run(args):
         min_confidence=args.min_confidence,
         parallel_extraction=not args.no_parallel,
         extractor_provider=args.provider,
-        extractor_model=args.model
+        extractor_model=args.model,
+        max_song_ratio=args.max_song_ratio
     )
     pipeline._no_move_processed = args.no_move_processed
 
@@ -477,7 +481,8 @@ def cmd_extract(args):
     extractor = SymptomExtractor(
         max_workers=10 if not args.no_parallel else 1,
         provider=args.provider,
-        model=args.model
+        model=args.model,
+        max_song_ratio=args.max_song_ratio
     )
 
     if args.video_id:
