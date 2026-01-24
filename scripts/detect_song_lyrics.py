@@ -418,26 +418,23 @@ def main():
     # Show statistics
     if args.stats:
         stats = get_song_lyrics_stats()
-        print("\n📊 Song Lyrics Detection Statistics")
+        print("\n📊 Song Lyrics Ratio Statistics")
         print("=" * 45)
         print(f"Total transcripts:     {stats['total']}")
-        print(f"Unchecked:             {stats['unchecked']}")
-        print(f"Song lyrics (skip):    {stats['song_lyrics']}")
-        print(f"Spoken content (keep): {stats['spoken_content']}")
+        print(f"Unchecked (no ratio):  {stats['unchecked']}")
+        print(f"Checked (has ratio):   {stats.get('checked', 0)}")
         
-        if stats['total'] > 0 and stats['unchecked'] < stats['total']:
-            checked = stats['total'] - stats['unchecked']
-            lyrics_pct = (stats['song_lyrics'] / checked * 100) if checked > 0 else 0
-            print(f"\nOf checked: {lyrics_pct:.1f}% flagged as song lyrics")
+        if stats.get('avg_ratio') is not None:
+            print(f"\n📈 Ratio Breakdown:")
+            print(f"  Average ratio:         {stats['avg_ratio']:.1%}")
+            print(f"  Pure spoken (<20%):    {stats.get('pure_spoken', 0)}")
+            print(f"  Mostly spoken (20-50%): {stats.get('mostly_spoken', 0)}")
+            print(f"  Mixed (50-80%):        {stats.get('mixed', 0)}")
+            print(f"  Mostly lyrics (>80%):  {stats.get('mostly_lyrics', 0)}")
             
-            # Show ratio breakdown if available
-            if stats.get('avg_ratio') is not None:
-                print(f"\n📈 Ratio Breakdown:")
-                print(f"  Average ratio:       {stats['avg_ratio']:.1%}")
-                print(f"  Pure spoken (<20%):  {stats.get('pure_spoken', 0)}")
-                print(f"  Mostly spoken:       {stats.get('mostly_spoken', 0)}")
-                print(f"  Mixed (50-80%):      {stats.get('mixed', 0)}")
-                print(f"  Mostly lyrics (>80%):{stats.get('mostly_lyrics', 0)}")
+            print(f"\n💡 Filter tips:")
+            print(f"  WHERE song_lyrics_ratio < 0.5  -- mostly spoken content")
+            print(f"  WHERE song_lyrics_ratio < 0.8  -- include some mixed")
         return
     
     # Get transcripts needing check
@@ -460,9 +457,6 @@ def main():
         print(f"Mode: Combined (heuristics + LLM)")
         print(f"LLM model: {args.model}")
         print(f"Ollama URL: {args.ollama_url}")
-    
-    print(f"Lyrics threshold: {args.lyrics_threshold:.0%} (above = flag as lyrics)")
-    print(f"Min spoken words: {args.min_spoken_words} (keep if has this many spoken words)")
     
     if args.verbose:
         print("Verbose: ON (detailed logging enabled)")
@@ -531,18 +525,18 @@ def main():
                     # Track ratios
                     ratio = result.get('song_lyrics_ratio', 0)
                     all_ratios.append(ratio)
-                    spoken_est = result.get('spoken_word_estimate', 0)
                     
-                    if result.get('is_song_lyrics'):
+                    # Categorize by ratio for display
+                    if ratio >= 0.8:
                         symbol = "🎵"
                         song_lyrics_count += 1
-                        print(f"[{i}/{len(transcripts)}] {symbol} Video {result['video_id']}: SKIP (ratio={ratio:.0%}, ~{spoken_est} spoken words)")
+                        print(f"[{i}/{len(transcripts)}] {symbol} Video {result['video_id']}: {ratio:.0%} lyrics")
                     else:
                         symbol = "💬"
                         spoken_count += 1
-                        # Only print every 10th for spoken content to reduce noise
-                        if i % 10 == 0 or i == len(transcripts):
-                            print(f"[{i}/{len(transcripts)}] {symbol} Video {result['video_id']}: KEEP (ratio={ratio:.0%}, ~{spoken_est} spoken words)")
+                        # Only print every 10th for mostly-spoken content to reduce noise
+                        if i % 10 == 0 or i == len(transcripts) or ratio >= 0.5:
+                            print(f"[{i}/{len(transcripts)}] {symbol} Video {result['video_id']}: {ratio:.0%} lyrics")
                             
                 except Exception as e:
                     print(f"[{i}/{len(transcripts)}] ✗ Error processing video {transcript['video_id']}: {e}")
@@ -563,8 +557,8 @@ def main():
     print("=" * 50)
     total = len(transcripts)
     print(f"Total processed:      {total}")
-    print(f"Skip (song lyrics):   {song_lyrics_count} ({song_lyrics_count/total*100:.1f}%)")
-    print(f"Keep (spoken):        {spoken_count} ({spoken_count/total*100:.1f}%)")
+    print(f"Mostly lyrics (>80%): {song_lyrics_count} ({song_lyrics_count/total*100:.1f}%)")
+    print(f"Mostly spoken (<80%): {spoken_count} ({spoken_count/total*100:.1f}%)")
     print(f"Errors:               {error_count}")
     print()
     

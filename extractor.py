@@ -23,7 +23,7 @@ from database import (
     insert_claimed_diagnosis, get_diagnoses_by_video,
     calculate_symptom_concordance, insert_treatment,
     update_comorbidity_pairs, insert_narrative_elements,
-    get_symptoms_by_video, update_transcript_song_lyrics_flag
+    get_symptoms_by_video, update_transcript_song_lyrics_ratio
 )
 
 
@@ -603,14 +603,16 @@ Return ONLY the JSON object, no additional text."""
         if not transcript_data:
             raise ValueError(f"No transcript found for video {video_id}")
         
-        # Check if already marked as song lyrics
-        if transcript_data.get('is_song_lyrics') is True:
-            print(f"⏭ Skipping video {video_id} - already marked as song lyrics")
+        # Check if already marked as mostly song lyrics (ratio >= 0.8)
+        song_ratio = transcript_data.get('song_lyrics_ratio')
+        if song_ratio is not None and song_ratio >= 0.8:
+            print(f"⏭ Skipping video {video_id} - song lyrics ratio {song_ratio:.0%}")
             return {
                 'video_id': video_id,
                 'success': True,
                 'skipped': True,
-                'reason': 'song_lyrics'
+                'reason': 'song_lyrics',
+                'song_lyrics_ratio': song_ratio
             }
         
         # Check if already extracted (skip to avoid duplicates)
@@ -728,21 +730,22 @@ Return ONLY the JSON object, no additional text."""
 
             data = json.loads(response_text)
 
-            # Check if transcript is song lyrics
+            # Check if LLM detected song lyrics during extraction
             if data.get('is_song_lyrics') is True:
-                update_transcript_song_lyrics_flag(video_id, True)
-                print(f"🎵 Video {video_id} detected as song lyrics - skipping extraction")
+                # Set high ratio (0.9 = 90% lyrics)
+                update_transcript_song_lyrics_ratio(video_id, 0.9)
+                print(f"🎵 Video {video_id} detected as song lyrics during extraction - skipping")
                 return {
                     'video_id': video_id,
                     'success': True,
                     'skipped': True,
                     'reason': 'song_lyrics',
-                    'is_song_lyrics': True
+                    'song_lyrics_ratio': 0.9
                 }
             
-            # Mark as NOT song lyrics (spoken content)
-            if transcript_data.get('is_song_lyrics') is None:
-                update_transcript_song_lyrics_flag(video_id, False)
+            # If ratio wasn't set by detect_song_lyrics.py, mark as spoken content (low ratio)
+            if transcript_data.get('song_lyrics_ratio') is None:
+                update_transcript_song_lyrics_ratio(video_id, 0.1)
 
             # Process symptoms
             symptoms_saved = 0
@@ -866,16 +869,19 @@ Return ONLY the JSON object, no additional text."""
         if self.use_combined_extraction and self.is_high_capability:
             return self.extract_all_combined(video_id, min_confidence, force=force)
         
-        # Check if already marked as song lyrics
+        # Check if already marked as mostly song lyrics (ratio >= 0.8)
         transcript_data = get_transcript(video_id)
-        if transcript_data and transcript_data.get('is_song_lyrics') is True:
-            print(f"⏭ Skipping video {video_id} - already marked as song lyrics")
-            return {
-                'video_id': video_id,
-                'success': True,
-                'skipped': True,
-                'reason': 'song_lyrics'
-            }
+        if transcript_data:
+            song_ratio = transcript_data.get('song_lyrics_ratio')
+            if song_ratio is not None and song_ratio >= 0.8:
+                print(f"⏭ Skipping video {video_id} - song lyrics ratio {song_ratio:.0%}")
+                return {
+                    'video_id': video_id,
+                    'success': True,
+                    'skipped': True,
+                    'reason': 'song_lyrics',
+                    'song_lyrics_ratio': song_ratio
+                }
         
         # Check if already extracted (skip to avoid duplicates)
         if not force:
