@@ -407,10 +407,6 @@ def main():
                         help='Use only heuristics (no LLM calls)')
     parser.add_argument('-v', '--verbose', action='store_true',
                         help='Show detailed logging of each transcript analysis')
-    parser.add_argument('--lyrics-threshold', type=float, default=0.8,
-                        help='Ratio threshold for is_song_lyrics=TRUE (default: 0.8 = 80%%)')
-    parser.add_argument('--min-spoken-words', type=int, default=20,
-                        help='Min spoken words to keep even if mostly lyrics (default: 20)')
     
     args = parser.parse_args()
     
@@ -503,9 +499,7 @@ def main():
                     args.ollama_url, 
                     args.dry_run,
                     args.heuristics_only,
-                    args.verbose,
-                    args.lyrics_threshold,
-                    args.min_spoken_words
+                    args.verbose
                 ): t 
                 for t in transcripts
             }
