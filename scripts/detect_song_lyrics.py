@@ -56,7 +56,7 @@ def signal_handler(signum, frame):
 from config import OLLAMA_URL, OLLAMA_MODEL
 from database import (
     get_transcripts_needing_song_check,
-    update_transcript_song_lyrics_flag,
+    update_transcript_song_lyrics_ratio,
     get_song_lyrics_stats
 )
 
@@ -288,14 +288,12 @@ def detect_song_lyrics_heuristic(transcript_text: str, verbose: bool = False) ->
 
 def process_transcript(transcript: dict, model: str, ollama_url: str, 
                        dry_run: bool = False, heuristics_only: bool = False,
-                       verbose: bool = False, lyrics_threshold: float = 0.8,
-                       min_spoken_words: int = 20) -> dict:
+                       verbose: bool = False) -> dict:
     """
     Process a single transcript for song lyrics detection using ratio-based scoring.
     
     Uses BOTH heuristics and LLM to estimate song_lyrics_ratio (0.0-1.0).
-    - LLM ratio weighted more heavily than heuristic
-    - is_song_lyrics = TRUE only if ratio >= threshold AND spoken content < min_words
+    LLM ratio weighted more heavily than heuristic (2x weight).
     
     Args:
         transcript: Dict with video_id, text, word_count
@@ -304,8 +302,6 @@ def process_transcript(transcript: dict, model: str, ollama_url: str,
         dry_run: If True, don't update database
         heuristics_only: If True, skip LLM
         verbose: If True, print detailed logging
-        lyrics_threshold: Ratio above which to flag as song lyrics (default 0.8)
-        min_spoken_words: Minimum spoken words to keep even if mostly lyrics (default 20)
     """
     video_id = transcript['video_id']
     text = transcript['text']
@@ -338,22 +334,13 @@ def process_transcript(transcript: dict, model: str, ollama_url: str,
         result['song_lyrics_ratio'] = final_ratio
         result['method'] = 'heuristic_only'
         
-        # Calculate estimated spoken words
-        spoken_word_estimate = int(word_count * (1 - final_ratio))
-        
-        # is_song_lyrics = TRUE only if high ratio AND not enough spoken content
-        is_lyrics = final_ratio >= lyrics_threshold and spoken_word_estimate < min_spoken_words
-        result['is_song_lyrics'] = is_lyrics
-        result['spoken_word_estimate'] = spoken_word_estimate
-        
         if verbose:
-            print(f"    [Decision] Heuristic only → ratio={final_ratio:.0%}, ~{spoken_word_estimate} spoken words")
-            print(f"    [Decision] is_song_lyrics={is_lyrics} (threshold={lyrics_threshold:.0%}, min_words={min_spoken_words})")
+            print(f"    [Result] Heuristic only → ratio={final_ratio:.0%}")
         
         if not dry_run:
-            update_transcript_song_lyrics_flag(video_id, is_lyrics, final_ratio)
+            update_transcript_song_lyrics_ratio(video_id, final_ratio)
             if verbose:
-                print(f"    [DB] Updated: is_song_lyrics={is_lyrics}, ratio={final_ratio:.2f}")
+                print(f"    [DB] Updated: song_lyrics_ratio={final_ratio:.2f}")
         
         return result
     
@@ -369,18 +356,13 @@ def process_transcript(transcript: dict, model: str, ollama_url: str,
         result['method'] = 'heuristic_fallback'
         result['llm_error'] = True
         
-        spoken_word_estimate = int(word_count * (1 - final_ratio))
-        is_lyrics = final_ratio >= lyrics_threshold and spoken_word_estimate < min_spoken_words
-        result['is_song_lyrics'] = is_lyrics
-        result['spoken_word_estimate'] = spoken_word_estimate
-        
         if verbose:
-            print(f"    [Decision] LLM failed, using heuristic → ratio={final_ratio:.0%}")
+            print(f"    [Result] LLM failed, using heuristic → ratio={final_ratio:.0%}")
         
         if not dry_run:
-            update_transcript_song_lyrics_flag(video_id, is_lyrics, final_ratio)
+            update_transcript_song_lyrics_ratio(video_id, final_ratio)
             if verbose:
-                print(f"    [DB] Updated: is_song_lyrics={is_lyrics}, ratio={final_ratio:.2f}")
+                print(f"    [DB] Updated: song_lyrics_ratio={final_ratio:.2f}")
         
         return result
     
@@ -393,31 +375,12 @@ def process_transcript(transcript: dict, model: str, ollama_url: str,
     if verbose:
         print(f"    [Combine] Heuristic={heuristic_ratio:.0%}, LLM={llm_ratio:.0%} → Final={final_ratio:.0%}")
     
-    # Calculate estimated spoken words
-    spoken_word_estimate = int(word_count * (1 - final_ratio))
-    result['spoken_word_estimate'] = spoken_word_estimate
-    
-    # is_song_lyrics = TRUE only if high ratio AND not enough spoken content
-    # This means even 90% lyrics with 50 spoken words will be kept
-    is_lyrics = final_ratio >= lyrics_threshold and spoken_word_estimate < min_spoken_words
-    result['is_song_lyrics'] = is_lyrics
-    
-    if verbose:
-        print(f"    [Decision] ~{spoken_word_estimate} estimated spoken words")
-        if is_lyrics:
-            print(f"    [Decision] SKIP: ratio={final_ratio:.0%} >= {lyrics_threshold:.0%} AND spoken={spoken_word_estimate} < {min_spoken_words}")
-        else:
-            if final_ratio < lyrics_threshold:
-                print(f"    [Decision] KEEP: ratio={final_ratio:.0%} < {lyrics_threshold:.0%} threshold")
-            else:
-                print(f"    [Decision] KEEP: has {spoken_word_estimate} spoken words (>= {min_spoken_words} min)")
-    
     if not dry_run:
-        update_transcript_song_lyrics_flag(video_id, is_lyrics, final_ratio)
+        update_transcript_song_lyrics_ratio(video_id, final_ratio)
         if verbose:
-            print(f"    [DB] Updated: is_song_lyrics={is_lyrics}, ratio={final_ratio:.2f}")
+            print(f"    [DB] Updated: song_lyrics_ratio={final_ratio:.2f}")
     elif verbose:
-        print(f"    [DB] DRY RUN - would set is_song_lyrics={is_lyrics}, ratio={final_ratio:.2f}")
+        print(f"    [DB] DRY RUN - would set song_lyrics_ratio={final_ratio:.2f}")
     
     return result
 

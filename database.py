@@ -198,7 +198,6 @@ def init_db():
                 segments JSONB,
                 transcribed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 processing_time_seconds REAL,
-                is_song_lyrics BOOLEAN DEFAULT NULL,
                 song_lyrics_ratio REAL DEFAULT NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE(video_id)
@@ -522,7 +521,6 @@ def init_db():
         cur.execute("CREATE INDEX IF NOT EXISTS idx_transcript_quality ON transcript_quality(transcript_id)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_narrative_elements_video ON narrative_elements(video_id)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_videos_creator_tier ON videos(creator_tier)")
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_transcripts_is_song_lyrics ON transcripts(is_song_lyrics)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_transcripts_song_lyrics_ratio ON transcripts(song_lyrics_ratio)")
 
         conn.commit()
@@ -681,37 +679,34 @@ def get_transcript(video_id: int) -> Optional[Dict[str, Any]]:
         return dict(result) if result else None
 
 
-def update_transcript_song_lyrics_flag(video_id: int, is_song_lyrics: bool, 
-                                       song_lyrics_ratio: float = None) -> bool:
-    """Update the is_song_lyrics flag and ratio for a transcript.
+def update_transcript_song_lyrics_ratio(video_id: int, song_lyrics_ratio: float) -> bool:
+    """Update the song_lyrics_ratio for a transcript.
     
     Args:
         video_id: The video ID
-        is_song_lyrics: Boolean flag (TRUE = skip for extraction)
-        song_lyrics_ratio: Float 0.0-1.0 indicating how much is lyrics (optional)
+        song_lyrics_ratio: Float 0.0-1.0 (0=pure spoken, 1=pure lyrics)
     """
     with get_connection() as conn:
         cur = conn.cursor()
         cur.execute("""
             UPDATE transcripts
-            SET is_song_lyrics = %s,
-                song_lyrics_ratio = %s
+            SET song_lyrics_ratio = %s
             WHERE video_id = %s
             RETURNING id
-        """, (is_song_lyrics, song_lyrics_ratio, video_id))
+        """, (song_lyrics_ratio, video_id))
         result = cur.fetchone()
         return result is not None
 
 
 def get_transcripts_needing_song_check(limit: int = None) -> List[Dict[str, Any]]:
-    """Get transcripts that haven't been checked for song lyrics."""
+    """Get transcripts that haven't been checked for song lyrics (ratio is NULL)."""
     with get_connection() as conn:
         cur = conn.cursor(cursor_factory=RealDictCursor)
         query = """
             SELECT t.id, t.video_id, t.text, t.word_count, v.title, v.author
             FROM transcripts t
             JOIN videos v ON t.video_id = v.id
-            WHERE t.is_song_lyrics IS NULL
+            WHERE t.song_lyrics_ratio IS NULL
             ORDER BY t.id
         """
         if limit:
@@ -721,15 +716,14 @@ def get_transcripts_needing_song_check(limit: int = None) -> List[Dict[str, Any]
 
 
 def get_song_lyrics_stats() -> Dict[str, Any]:
-    """Get statistics about song lyrics detection."""
+    """Get statistics about song lyrics detection (ratio-based)."""
     with get_connection() as conn:
         cur = conn.cursor(cursor_factory=RealDictCursor)
         cur.execute("""
             SELECT 
                 COUNT(*) as total,
-                COUNT(*) FILTER (WHERE is_song_lyrics IS NULL) as unchecked,
-                COUNT(*) FILTER (WHERE is_song_lyrics = TRUE) as song_lyrics,
-                COUNT(*) FILTER (WHERE is_song_lyrics = FALSE) as spoken_content,
+                COUNT(*) FILTER (WHERE song_lyrics_ratio IS NULL) as unchecked,
+                COUNT(*) FILTER (WHERE song_lyrics_ratio IS NOT NULL) as checked,
                 AVG(song_lyrics_ratio) FILTER (WHERE song_lyrics_ratio IS NOT NULL) as avg_ratio,
                 COUNT(*) FILTER (WHERE song_lyrics_ratio < 0.2) as pure_spoken,
                 COUNT(*) FILTER (WHERE song_lyrics_ratio >= 0.2 AND song_lyrics_ratio < 0.5) as mostly_spoken,
