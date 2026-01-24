@@ -57,7 +57,7 @@ class SymptomExtractor:
         model: Optional[str] = None,
         ollama_url: Optional[str] = None,
         use_combined_extraction: bool = True,  # Single prompt for all extractions
-        max_song_ratio: float = 0.6,  # Skip videos with song_lyrics_ratio >= this
+        max_song_ratio: float = 0.33,  # Skip videos with song_lyrics_ratio >= this
     ):
         """
         Initialize the symptom extractor.
