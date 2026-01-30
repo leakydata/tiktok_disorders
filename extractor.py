@@ -27,19 +27,34 @@ from database import (
 )
 
 
-# Comprehensive symptom categories for EDS, MCAS, and POTS
+# Symptom categories tuned for EDS / MCAS / POTS discourse (and adjacent mind-body vocabulary)
 SYMPTOM_CATEGORIES = {
-    'musculoskeletal': 'Joint pain, hypermobility, dislocations, subluxations, chronic pain',
-    'cardiovascular': 'Tachycardia, palpitations, blood pressure issues, dizziness, fainting',
-    'gastrointestinal': 'Nausea, vomiting, gastroparesis, IBS, reflux, constipation, diarrhea',
-    'neurological': 'Brain fog, headaches, migraines, difficulty concentrating, memory issues',
-    'autonomic': 'Temperature regulation, sweating issues, tremors, exercise intolerance',
-    'allergic': 'Flushing, hives, itching, anaphylaxis, food sensitivities, chemical sensitivities',
-    'dermatological': 'Skin hyperextensibility, easy bruising, scarring, skin fragility, rashes',
-    'respiratory': 'Shortness of breath, asthma-like symptoms, breathing difficulties',
-    'fatigue': 'Chronic fatigue, post-exertional malaise, exhaustion, sleep issues',
-    'other': 'Other symptoms not fitting above categories'
+    "musculoskeletal": "Joint pain, hypermobility, dislocations, subluxations, instability, muscle spasms, back/neck pain",
+    "connective_tissue_structural": "Hernias, prolapse, pelvic floor dysfunction, scoliosis, cervical instability, poor wound healing, tissue fragility",
+    "cardiovascular": "Tachycardia, palpitations, chest pain, shortness of breath on exertion, blood pressure swings",
+    "orthostatic_intolerance": "Dizziness, lightheadedness, fainting, presyncope, blood pooling, standing intolerance, shower intolerance",
+    "autonomic": "Temperature dysregulation, sweating issues, tremor, adrenaline surges, exercise intolerance, fatigue after exertion",
+    "gastrointestinal": "Nausea, vomiting, reflux, IBS symptoms, constipation, diarrhea, bloating, gastroparesis, abdominal pain",
+    "mast_cell_allergy_like": "Flushing, hives, itching, swelling, throat tightness, anaphylaxis/anaphylactoid reactions, food/chemical sensitivity, histamine reactions",
+    "dermatological": "Rashes, bruising, stretch marks, fragile skin, abnormal scarring, dermatographia",
+    "respiratory": "Wheezing, asthma-like symptoms, air hunger, throat tightness, breathing difficulty",
+    "neurological": "Headaches, migraines, neuropathy (tingling/numbness/burning), tremor, seizures/syncope discussion, coordination issues",
+    "cognitive": "Brain fog, memory issues, attention problems, word-finding difficulty, confusion",
+    "fatigue": "Chronic fatigue, post-exertional malaise, exhaustion, low stamina, crashes",
+    "sleep": "Insomnia, hypersomnia, unrefreshing sleep, circadian disruption, sleep apnea discussion",
+    "ent_balance": "Vertigo, dizziness (non-orthostatic), tinnitus, ear fullness, sinus issues, globus sensation",
+    "ocular": "Dry eyes, blurry vision, light sensitivity, floaters, eye strain, visual snow discussion",
+    "dental_tmj": "TMJ, jaw pain, dental crowding, gum issues, enamel fragility, teeth grinding",
+    "gynecologic": "Menstrual issues, endometriosis, pelvic pain, hormonal fluctuations, PCOS discussion",
+    "urological": "Interstitial cystitis, bladder pain, urgency, frequency, incontinence, UTIs discussion",
+    "immune_inflammation": "Frequent infections, slow healing, autoimmune talk, inflammation markers discussion",
+    "sensory_overload": "Light/sound sensitivity, overstimulation, sensory intolerance, motion sensitivity",
+    "somatic_functional": "Nervous system dysregulation, fight-or-flight, dissociation/DPDR, somatic symptoms framing, trauma-body connection",
+    "affective": "Anxiety, depression, panic, mood swings, health anxiety discussion",
+    "treatments_devices": "IV fluids, port/PICC, mobility aids, compression garments, salt/electrolytes, beta blockers, antihistamines, mast cell meds, supplements",
+    "other": "Other symptoms not fitting above categories"
 }
+
 
 
 class SymptomExtractor:
