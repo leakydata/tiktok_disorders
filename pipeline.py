@@ -488,7 +488,7 @@ def cmd_extract(args):
     if args.video_id:
         video_ids = [args.video_id]
     elif args.all:
-        # Find videos with transcripts but no symptoms
+        # Find videos with transcripts but no symptoms, excluding song lyrics
         with get_connection() as conn:
             cur = conn.cursor()
             cur.execute("""
@@ -496,14 +496,29 @@ def cmd_extract(args):
                 FROM transcripts t
                 LEFT JOIN symptoms s ON t.video_id = s.video_id
                 WHERE s.id IS NULL
-            """)
+                  AND (t.song_lyrics_ratio IS NULL OR t.song_lyrics_ratio < %s)
+            """, (args.max_song_ratio,))
             video_ids = [row[0] for row in cur.fetchall()]
+            
+            # Also count how many were skipped due to song lyrics
+            cur.execute("""
+                SELECT COUNT(*)
+                FROM transcripts t
+                LEFT JOIN symptoms s ON t.video_id = s.video_id
+                WHERE s.id IS NULL
+                  AND t.song_lyrics_ratio >= %s
+            """, (args.max_song_ratio,))
+            skipped_count = cur.fetchone()[0]
 
         if not video_ids:
             print("All transcripts already processed!")
+            if skipped_count > 0:
+                print(f"  ({skipped_count} skipped due to song_lyrics_ratio >= {args.max_song_ratio})")
             return 0
 
         print(f"Found {len(video_ids)} video(s) to extract symptoms from")
+        if skipped_count > 0:
+            print(f"  ({skipped_count} skipped due to song_lyrics_ratio >= {args.max_song_ratio})")
     else:
         print("Error: Provide --video-id or --all")
         return 1
