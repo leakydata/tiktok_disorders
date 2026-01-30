@@ -647,20 +647,27 @@ The extractor classifies symptoms into these categories (defined in `extractor.p
 | Category | Description |
 |----------|-------------|
 | musculoskeletal | Joint pain, hypermobility, dislocations, subluxations, chronic pain |
-| cardiovascular | Tachycardia, palpitations, blood pressure issues, dizziness, fainting |
-| gastrointestinal | Nausea, vomiting, gastroparesis, IBS, reflux, constipation, diarrhea |
-| neurological | Brain fog, headaches, migraines, difficulty concentrating, memory issues |
-| autonomic | Temperature regulation, sweating issues, tremors, exercise intolerance |
-| allergic | Flushing, hives, itching, anaphylaxis, food sensitivities |
-| dermatological | Skin hyperextensibility, easy bruising, scarring, skin fragility, rashes |
+| craniocervical | CCI, AAI, Chiari, skull settling, tethered cord |
+| cardiovascular | Tachycardia, palpitations, blood pressure issues, chest pain |
+| orthostatic_intolerance | Dizziness, fainting, blood pooling, POTS symptoms |
+| autonomic | Dysautonomia, adrenaline surges, nervous system dysregulation |
+| thermoregulation | Temperature regulation, Raynaud's, heat/cold intolerance |
+| gastrointestinal | Nausea, gastroparesis, IBS, reflux, SIBO, motility issues |
+| mast_cell_allergy_like | Flushing, hives, anaphylaxis, MCAS, histamine reactions |
 | respiratory | Shortness of breath, asthma-like symptoms, breathing difficulties |
-| fatigue | Chronic fatigue, post-exertional malaise, exhaustion, sleep issues |
-| gynecologic | Menstrual issues, endometriosis, pelvic pain, hormonal fluctuations, PCOS |
-| urological | Bladder issues, frequent urination, interstitial cystitis, incontinence |
-| ocular | Vision problems, dry eyes, light sensitivity, floaters, eye strain |
-| dental | TMJ, jaw pain, dental fragility, gum issues, teeth grinding |
-| psychological | Anxiety, depression, PTSD, panic attacks, mood swings |
-| immune | Frequent infections, slow healing, immune dysfunction, autoimmune symptoms |
+| ent | **Sinus issues**, sinus pain/pressure, tinnitus, ear fullness, post-nasal drip |
+| neurological | Headaches, migraines, neuropathy, nerve pain, tremors |
+| cognitive | Brain fog, memory issues, word-finding difficulty, confusion |
+| fatigue | Chronic fatigue, post-exertional malaise, crashes, PEM |
+| dermatological | Skin hyperextensibility, bruising, scarring, rashes |
+| vascular_bleeding | Easy bruising, heavy periods, nosebleeds, vascular fragility |
+| gynecologic | Menstrual issues, endometriosis, pelvic pain, PCOS |
+| urological | Bladder issues, interstitial cystitis, incontinence |
+| ocular | Vision problems, dry eyes, light sensitivity |
+| dental | TMJ, jaw pain, dental fragility |
+| psychological | Anxiety, depression, PTSD, panic attacks |
+| immune | Frequent infections, slow healing, autoimmune symptoms |
+| sleep | Insomnia, sleep apnea, unrefreshing sleep |
 | other | Other symptoms not fitting above categories |
 
 To add custom categories, edit the `SYMPTOM_CATEGORIES` dictionary in `extractor.py`.

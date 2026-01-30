@@ -163,10 +163,12 @@ SYMPTOM_CATEGORIES = {
        "vestibular issues, balance problems, motion sensitivity, labyrinthitis"
    ),
    
-   "ent": (
-       "Tinnitus, ear fullness, Eustachian tube dysfunction, 'ears ringing', "
-       "chronic sinusitis, sinus issues, post-nasal drip, globus sensation, 'lump in throat'"
-   ),
+    "ent": (
+        "ear nose and throat symptoms, Sinus symptoms, sinus pain, sinus pressure, sinus congestion, sinusitis, chronic sinusitis, "
+        "nasal congestion, runny nose, rhinitis, 'stuffy nose', 'sinuses blocked', 'sinus headache', "
+        "tinnitus, ear fullness, ear pain, Eustachian tube dysfunction, 'ears ringing', "
+        "post-nasal drip, globus sensation, 'lump in throat', throat clearing, 'constant drainage'"
+    ),
 
     # === OCULAR ===
     "ocular": (
