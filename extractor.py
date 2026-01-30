@@ -1361,11 +1361,20 @@ Return ONLY the JSON object, no additional text."""
                 # This avoids verbose chain-of-thought in JSON output
                 final_prompt = f"/no_think\n\n{prompt}"
         
-        # Generous timeouts for local LLMs - first inference can be slow due to model loading
+        # Generous timeouts for local LLMs - scale with prompt length
+        prompt_chars = len(final_prompt)
+        base_timeout = 600  # 10 min base
+        
+        # Add 1 minute per 5000 chars over 5000
+        extra_time = max(0, (prompt_chars - 5000) // 5000) * 60
+        timeout = base_timeout + extra_time
+        
+        # Qwen3 thinking mode needs even more time
         if self.is_qwen3 and (force_thinking or self.enable_thinking):
-            timeout = 900  # 15 min for Qwen3 thinking mode
-        else:
-            timeout = 600  # 10 min default - handles model loading, large contexts
+            timeout = max(timeout, 900)  # At least 15 min for thinking mode
+        
+        # Cap at 30 minutes
+        timeout = min(timeout, 1800)
         
         # Adjust context/predict based on model
         if self.is_qwen3:
