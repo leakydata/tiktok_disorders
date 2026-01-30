@@ -359,8 +359,14 @@ class SymptomExtractor:
         model_lower = self.model.lower()
         self.is_qwen3 = 'qwen3' in model_lower or 'qwen-3' in model_lower
         self.is_medgemma = 'medgemma' in model_lower
+        
+        # High-capability models get longer timeouts and combined extraction
+        # Be inclusive - most modern models >7B are capable
         self.is_high_capability = any(x in model_lower for x in [
-            'gpt-oss', 'qwen2.5:20b', 'qwen3', 'llama3:70b', 'mixtral', 'medgemma'
+            'gpt-oss', 'qwen', 'llama3', 'llama-3', 'mixtral', 'medgemma',
+            'gemma', 'phi', 'glm', 'deepseek', 'yi', 'mistral', 'command-r',
+            'claude', 'gpt-4', 'wizard', 'solar', 'nous', 'dolphin',
+            ':20b', ':27b', ':32b', ':34b', ':70b', ':72b', ':120b',  # Size-based detection
         ])
         
         if self.is_qwen3:
@@ -373,6 +379,10 @@ class SymptomExtractor:
             print(f"    Medical terminology deeply embedded from training")
         elif self.is_high_capability:
             print(f"[OK] High-capability model detected: {self.model}")
+        else:
+            # Fallback - treat any Ollama model as capable (user chose it for a reason)
+            print(f"[OK] Using model: {self.model}")
+            self.is_high_capability = True  # Default to capable
         
         if self.use_combined_extraction:
             print(f"    Using combined extraction for efficiency")
@@ -1351,13 +1361,11 @@ Return ONLY the JSON object, no additional text."""
                 # This avoids verbose chain-of-thought in JSON output
                 final_prompt = f"/no_think\n\n{prompt}"
         
-        # Longer timeout for large models - thinking mode needs more time
+        # Generous timeouts for local LLMs - first inference can be slow due to model loading
         if self.is_qwen3 and (force_thinking or self.enable_thinking):
-            timeout = 600  # 10 min for thinking mode
-        elif self.is_high_capability:
-            timeout = 300
+            timeout = 900  # 15 min for Qwen3 thinking mode
         else:
-            timeout = 120
+            timeout = 600  # 10 min default - handles model loading, large contexts
         
         # Adjust context/predict based on model
         if self.is_qwen3:
