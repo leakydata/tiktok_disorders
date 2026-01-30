@@ -490,41 +490,41 @@ def cmd_extract(args):
     if args.video_id:
         video_ids = [args.video_id]
     elif args.all:
-        # Find videos with transcripts but no symptoms, excluding song lyrics and short transcripts
+        # Find videos with transcripts that haven't been extracted yet
+        # Excludes: already extracted, song lyrics, and short transcripts
         with get_connection() as conn:
             cur = conn.cursor()
             cur.execute("""
                 SELECT DISTINCT t.video_id
                 FROM transcripts t
-                LEFT JOIN symptoms s ON t.video_id = s.video_id
-                WHERE s.id IS NULL
+                WHERE t.extracted_at IS NULL
                   AND (t.song_lyrics_ratio IS NULL OR t.song_lyrics_ratio < %s)
                   AND (t.word_count IS NULL OR t.word_count >= %s)
             """, (args.max_song_ratio, min_words))
             video_ids = [row[0] for row in cur.fetchall()]
             
-            # Count how many were skipped
+            # Count how many were skipped for each reason
             cur.execute("""
                 SELECT 
-                    COUNT(*) FILTER (WHERE t.song_lyrics_ratio >= %s) as skipped_lyrics,
-                    COUNT(*) FILTER (WHERE t.word_count < %s) as skipped_short
+                    COUNT(*) FILTER (WHERE t.extracted_at IS NOT NULL) as already_extracted,
+                    COUNT(*) FILTER (WHERE t.extracted_at IS NULL AND t.song_lyrics_ratio >= %s) as skipped_lyrics,
+                    COUNT(*) FILTER (WHERE t.extracted_at IS NULL AND t.word_count < %s) as skipped_short
                 FROM transcripts t
-                LEFT JOIN symptoms s ON t.video_id = s.video_id
-                WHERE s.id IS NULL
             """, (args.max_song_ratio, min_words))
             row = cur.fetchone()
-            skipped_lyrics = row[0]
-            skipped_short = row[1]
+            already_extracted = row[0]
+            skipped_lyrics = row[1]
+            skipped_short = row[2]
 
         if not video_ids:
             print("All transcripts already processed!")
-            if skipped_lyrics > 0 or skipped_short > 0:
-                print(f"  (Skipped: {skipped_lyrics} song lyrics, {skipped_short} too short)")
+            if already_extracted > 0 or skipped_lyrics > 0 or skipped_short > 0:
+                print(f"  ({already_extracted} already extracted, {skipped_lyrics} song lyrics, {skipped_short} too short)")
             return 0
 
         print(f"Found {len(video_ids)} video(s) to extract symptoms from")
-        if skipped_lyrics > 0 or skipped_short > 0:
-            print(f"  (Skipped: {skipped_lyrics} song lyrics, {skipped_short} too short < {min_words} words)")
+        if already_extracted > 0 or skipped_lyrics > 0 or skipped_short > 0:
+            print(f"  ({already_extracted} already extracted, {skipped_lyrics} song lyrics, {skipped_short} too short < {min_words} words)")
     else:
         print("Error: Provide --video-id or --all")
         return 1
@@ -796,6 +796,8 @@ Examples:
                            help='Skip videos with song_lyrics_ratio >= this (default: 0.2)')
     ex_parser.add_argument('--min-words', type=int, default=20,
                            help='Skip transcripts with fewer than this many words (default: 20)')
+    ex_parser.add_argument('--force', action='store_true',
+                           help='Re-extract even if already processed (clears previous extraction)')
     ex_parser.set_defaults(func=cmd_extract)
 
     # --- analyze subcommand ---
