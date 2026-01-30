@@ -322,6 +322,87 @@ def init_db():
             )
         """)
 
+        # =============================================================================
+        # User Longitudinal Tracking Tables
+        # =============================================================================
+        
+        # User profiles - aggregated view per creator
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS user_profiles (
+                id SERIAL PRIMARY KEY,
+                username TEXT UNIQUE NOT NULL,
+                first_video_date DATE,
+                last_video_date DATE,
+                video_count INTEGER DEFAULT 0,
+                total_symptoms_reported INTEGER DEFAULT 0,
+                unique_diagnoses_count INTEGER DEFAULT 0,
+                avg_concordance_score REAL,
+                avg_core_symptom_score REAL,
+                primary_condition TEXT,
+                follower_count BIGINT,
+                
+                -- STRAIN indicators aggregated
+                self_diagnosis_ratio REAL,
+                professional_diagnosis_ratio REAL,
+                doctor_dismissal_mentions INTEGER DEFAULT 0,
+                stress_trigger_mentions INTEGER DEFAULT 0,
+                
+                -- Flags for research
+                is_flagged_low_concordance BOOLEAN DEFAULT FALSE,
+                is_flagged_inconsistent_symptoms BOOLEAN DEFAULT FALSE,
+                research_notes TEXT,
+                
+                last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_user_profiles_username ON user_profiles(username)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_user_profiles_primary_condition ON user_profiles(primary_condition)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_user_profiles_concordance ON user_profiles(avg_concordance_score)")
+
+        # Diagnosis timeline - when each user first claimed each diagnosis
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS diagnosis_timeline (
+                id SERIAL PRIMARY KEY,
+                username TEXT NOT NULL,
+                condition_code TEXT NOT NULL,
+                first_mentioned DATE NOT NULL,
+                last_mentioned DATE,
+                mention_count INTEGER DEFAULT 1,
+                was_self_diagnosed BOOLEAN,
+                diagnosis_order INTEGER,
+                days_since_previous_diagnosis INTEGER,
+                previous_diagnosis TEXT,
+                
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(username, condition_code)
+            )
+        """)
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_diagnosis_timeline_username ON diagnosis_timeline(username)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_diagnosis_timeline_condition ON diagnosis_timeline(condition_code)")
+
+        # Symptom consistency tracking
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS symptom_consistency (
+                id SERIAL PRIMARY KEY,
+                username TEXT NOT NULL,
+                symptom TEXT NOT NULL,
+                category TEXT,
+                total_mentions INTEGER DEFAULT 1,
+                severity_variations INTEGER DEFAULT 1,
+                all_severities TEXT[],
+                first_mentioned DATE,
+                last_mentioned DATE,
+                avg_confidence REAL,
+                is_inconsistent BOOLEAN DEFAULT FALSE,
+                
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(username, symptom)
+            )
+        """)
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_symptom_consistency_username ON symptom_consistency(username)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_symptom_consistency_inconsistent ON symptom_consistency(is_inconsistent)")
+
         # Processing runs
         cur.execute("""
             CREATE TABLE IF NOT EXISTS processing_runs (
@@ -1764,6 +1845,315 @@ def get_strain_indicators_summary() -> Dict[str, Any]:
         
         indicators['by_content_type'] = by_content_type
         return indicators
+
+
+# =============================================================================
+# User-Level Analysis Functions (for longitudinal tracking)
+# =============================================================================
+
+def get_user_profile(username: str) -> Dict[str, Any]:
+    """Get comprehensive profile for a TikTok user across all their videos."""
+    with get_connection() as conn:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        
+        # Basic user stats
+        cur.execute("""
+            SELECT 
+                author as username,
+                COUNT(*) as video_count,
+                MIN(upload_date) as first_video_date,
+                MAX(upload_date) as last_video_date,
+                SUM(view_count) as total_views,
+                AVG(like_count) as avg_likes,
+                MAX(author_follower_count) as follower_count
+            FROM videos
+            WHERE LOWER(author) = LOWER(%s)
+            GROUP BY author
+        """, (username,))
+        basic_stats = cur.fetchone()
+        if not basic_stats:
+            return None
+        
+        profile = dict(basic_stats)
+        
+        # Get all video IDs for this user
+        cur.execute("""
+            SELECT id FROM videos WHERE LOWER(author) = LOWER(%s)
+        """, (username,))
+        video_ids = [row['id'] for row in cur.fetchall()]
+        profile['video_ids'] = video_ids
+        
+        # All claimed diagnoses with first mention date
+        cur.execute("""
+            SELECT 
+                cd.condition_code,
+                cd.condition_name,
+                COUNT(*) as mention_count,
+                AVG(cd.confidence) as avg_confidence,
+                BOOL_OR(cd.is_self_diagnosed) as ever_self_diagnosed,
+                MIN(v.upload_date) as first_mentioned,
+                MAX(v.upload_date) as last_mentioned
+            FROM claimed_diagnoses cd
+            JOIN videos v ON cd.video_id = v.id
+            WHERE LOWER(v.author) = LOWER(%s)
+            GROUP BY cd.condition_code, cd.condition_name
+            ORDER BY first_mentioned
+        """, (username,))
+        profile['diagnoses'] = [dict(row) for row in cur.fetchall()]
+        
+        # All symptoms with frequency
+        cur.execute("""
+            SELECT 
+                s.symptom,
+                s.category,
+                COUNT(*) as mention_count,
+                AVG(s.confidence) as avg_confidence,
+                ARRAY_AGG(DISTINCT s.severity) as severities_reported
+            FROM symptoms s
+            JOIN videos v ON s.video_id = v.id
+            WHERE LOWER(v.author) = LOWER(%s)
+            GROUP BY s.symptom, s.category
+            ORDER BY mention_count DESC
+        """, (username,))
+        profile['symptoms'] = [dict(row) for row in cur.fetchall()]
+        
+        # Concordance scores per condition
+        cur.execute("""
+            SELECT 
+                cd.condition_code,
+                AVG(sc.concordance_score) as avg_concordance,
+                AVG(sc.core_symptom_score) as avg_core_score,
+                MIN(sc.concordance_score) as min_concordance,
+                MAX(sc.concordance_score) as max_concordance,
+                COUNT(*) as sample_count
+            FROM symptom_concordance sc
+            JOIN claimed_diagnoses cd ON sc.diagnosis_id = cd.id
+            JOIN videos v ON sc.video_id = v.id
+            WHERE LOWER(v.author) = LOWER(%s)
+            GROUP BY cd.condition_code
+        """, (username,))
+        profile['concordance'] = [dict(row) for row in cur.fetchall()]
+        
+        # STRAIN narrative indicators aggregated
+        cur.execute("""
+            SELECT 
+                SUM(CASE WHEN mentions_self_diagnosis THEN 1 ELSE 0 END) as self_diagnosis_mentions,
+                SUM(CASE WHEN mentions_professional_diagnosis THEN 1 ELSE 0 END) as professional_diagnosis_mentions,
+                SUM(CASE WHEN mentions_doctor_dismissal THEN 1 ELSE 0 END) as doctor_dismissal_mentions,
+                SUM(CASE WHEN mentions_medical_gaslighting THEN 1 ELSE 0 END) as medical_gaslighting_mentions,
+                SUM(CASE WHEN mentions_stress_triggers THEN 1 ELSE 0 END) as stress_trigger_mentions,
+                SUM(CASE WHEN mentions_online_community THEN 1 ELSE 0 END) as online_community_mentions,
+                SUM(CASE WHEN mentions_learning_from_tiktok THEN 1 ELSE 0 END) as learned_from_tiktok_mentions,
+                COUNT(*) as total_narratives
+            FROM narrative_elements ne
+            JOIN videos v ON ne.video_id = v.id
+            WHERE LOWER(v.author) = LOWER(%s)
+        """, (username,))
+        profile['strain_indicators'] = dict(cur.fetchone() or {})
+        
+        # Treatment mentions
+        cur.execute("""
+            SELECT 
+                t.treatment_type,
+                t.treatment_name,
+                COUNT(*) as mention_count,
+                ARRAY_AGG(DISTINCT t.effectiveness) as reported_effectiveness
+            FROM treatments t
+            JOIN videos v ON t.video_id = v.id
+            WHERE LOWER(v.author) = LOWER(%s)
+            GROUP BY t.treatment_type, t.treatment_name
+            ORDER BY mention_count DESC
+            LIMIT 20
+        """, (username,))
+        profile['treatments'] = [dict(row) for row in cur.fetchall()]
+        
+        return profile
+
+
+def get_user_timeline(username: str) -> List[Dict[str, Any]]:
+    """Get chronological timeline of a user's health narrative evolution."""
+    with get_connection() as conn:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        
+        cur.execute("""
+            SELECT 
+                v.id as video_id,
+                v.upload_date,
+                v.title,
+                v.view_count,
+                t.word_count,
+                t.song_lyrics_ratio,
+                ARRAY_AGG(DISTINCT cd.condition_code) FILTER (WHERE cd.condition_code IS NOT NULL) as diagnoses_mentioned,
+                COUNT(DISTINCT s.id) as symptom_count,
+                ARRAY_AGG(DISTINCT s.category) FILTER (WHERE s.category IS NOT NULL) as symptom_categories,
+                ne.mentions_self_diagnosis,
+                ne.mentions_professional_diagnosis,
+                ne.content_type
+            FROM videos v
+            LEFT JOIN transcripts t ON v.id = t.video_id
+            LEFT JOIN claimed_diagnoses cd ON v.id = cd.video_id
+            LEFT JOIN symptoms s ON v.id = s.video_id
+            LEFT JOIN narrative_elements ne ON v.id = ne.video_id
+            WHERE LOWER(v.author) = LOWER(%s)
+            GROUP BY v.id, v.upload_date, v.title, v.view_count, t.word_count, t.song_lyrics_ratio,
+                     ne.mentions_self_diagnosis, ne.mentions_professional_diagnosis, ne.content_type
+            ORDER BY v.upload_date
+        """, (username,))
+        
+        return [dict(row) for row in cur.fetchall()]
+
+
+def get_user_concordance_over_time(username: str) -> List[Dict[str, Any]]:
+    """Track how a user's concordance scores change over time."""
+    with get_connection() as conn:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        
+        cur.execute("""
+            SELECT 
+                v.upload_date,
+                v.id as video_id,
+                cd.condition_code,
+                sc.concordance_score,
+                sc.core_symptom_score,
+                sc.total_symptoms_reported,
+                sc.expected_symptoms_matched,
+                sc.unexpected_symptoms_count
+            FROM symptom_concordance sc
+            JOIN claimed_diagnoses cd ON sc.diagnosis_id = cd.id
+            JOIN videos v ON sc.video_id = v.id
+            WHERE LOWER(v.author) = LOWER(%s)
+            ORDER BY v.upload_date, cd.condition_code
+        """, (username,))
+        
+        return [dict(row) for row in cur.fetchall()]
+
+
+def get_all_users_summary() -> List[Dict[str, Any]]:
+    """Get summary statistics for all users in the database."""
+    with get_connection() as conn:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        
+        cur.execute("""
+            SELECT 
+                v.author as username,
+                COUNT(DISTINCT v.id) as video_count,
+                COUNT(DISTINCT cd.condition_code) as unique_diagnoses,
+                COUNT(DISTINCT s.symptom) as unique_symptoms,
+                AVG(sc.concordance_score) as avg_concordance,
+                MIN(v.upload_date) as first_video,
+                MAX(v.upload_date) as last_video,
+                MAX(v.author_follower_count) as followers
+            FROM videos v
+            LEFT JOIN claimed_diagnoses cd ON v.id = cd.video_id
+            LEFT JOIN symptoms s ON v.id = s.video_id
+            LEFT JOIN symptom_concordance sc ON v.id = sc.video_id
+            WHERE v.author IS NOT NULL
+            GROUP BY v.author
+            HAVING COUNT(DISTINCT v.id) >= 1
+            ORDER BY video_count DESC
+        """)
+        
+        return [dict(row) for row in cur.fetchall()]
+
+
+def get_diagnosis_acquisition_patterns() -> List[Dict[str, Any]]:
+    """Analyze patterns of how users acquire new diagnoses over time."""
+    with get_connection() as conn:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        
+        # For each user, find when they first mentioned each condition
+        cur.execute("""
+            WITH first_mentions AS (
+                SELECT 
+                    v.author,
+                    cd.condition_code,
+                    MIN(v.upload_date) as first_mention_date,
+                    ROW_NUMBER() OVER (PARTITION BY v.author ORDER BY MIN(v.upload_date)) as diagnosis_order
+                FROM claimed_diagnoses cd
+                JOIN videos v ON cd.video_id = v.id
+                WHERE v.author IS NOT NULL AND v.upload_date IS NOT NULL
+                GROUP BY v.author, cd.condition_code
+            )
+            SELECT 
+                author as username,
+                condition_code,
+                first_mention_date,
+                diagnosis_order,
+                LAG(condition_code) OVER (PARTITION BY author ORDER BY first_mention_date) as previous_diagnosis,
+                LAG(first_mention_date) OVER (PARTITION BY author ORDER BY first_mention_date) as previous_date
+            FROM first_mentions
+            ORDER BY author, first_mention_date
+        """)
+        
+        return [dict(row) for row in cur.fetchall()]
+
+
+def get_symptom_consistency_analysis(username: str) -> Dict[str, Any]:
+    """Analyze symptom reporting consistency for a user across their videos."""
+    with get_connection() as conn:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        
+        # Get symptom reporting patterns
+        cur.execute("""
+            SELECT 
+                s.symptom,
+                s.category,
+                COUNT(*) as times_mentioned,
+                COUNT(DISTINCT s.severity) as severity_variations,
+                ARRAY_AGG(DISTINCT s.severity) as all_severities,
+                AVG(s.confidence) as avg_confidence,
+                MIN(v.upload_date) as first_mentioned,
+                MAX(v.upload_date) as last_mentioned
+            FROM symptoms s
+            JOIN videos v ON s.video_id = v.id
+            WHERE LOWER(v.author) = LOWER(%s)
+            GROUP BY s.symptom, s.category
+            ORDER BY times_mentioned DESC
+        """, (username,))
+        symptom_patterns = [dict(row) for row in cur.fetchall()]
+        
+        # Find symptoms with inconsistent severity reporting
+        inconsistent = [s for s in symptom_patterns if s['severity_variations'] > 1]
+        
+        # Get video count
+        cur.execute("""
+            SELECT COUNT(*) as count FROM videos WHERE LOWER(author) = LOWER(%s)
+        """, (username,))
+        video_count = cur.fetchone()['count']
+        
+        return {
+            'username': username,
+            'video_count': video_count,
+            'total_unique_symptoms': len(symptom_patterns),
+            'symptoms_with_inconsistent_severity': len(inconsistent),
+            'inconsistent_symptoms': inconsistent[:10],  # Top 10
+            'all_symptoms': symptom_patterns
+        }
+
+
+def get_users_with_low_concordance(threshold: float = 0.3) -> List[Dict[str, Any]]:
+    """Find users with consistently low concordance scores (potential social contagion cases)."""
+    with get_connection() as conn:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        
+        cur.execute("""
+            SELECT 
+                v.author as username,
+                cd.condition_code,
+                AVG(sc.concordance_score) as avg_concordance,
+                AVG(sc.core_symptom_score) as avg_core_score,
+                COUNT(*) as video_count,
+                BOOL_OR(cd.is_self_diagnosed) as includes_self_diagnosed
+            FROM symptom_concordance sc
+            JOIN claimed_diagnoses cd ON sc.diagnosis_id = cd.id
+            JOIN videos v ON sc.video_id = v.id
+            WHERE v.author IS NOT NULL
+            GROUP BY v.author, cd.condition_code
+            HAVING AVG(sc.concordance_score) < %s AND COUNT(*) >= 2
+            ORDER BY avg_concordance ASC
+        """, (threshold,))
+        
+        return [dict(row) for row in cur.fetchall()]
 
 
 if __name__ == '__main__':
