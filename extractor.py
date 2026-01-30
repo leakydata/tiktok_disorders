@@ -1153,14 +1153,16 @@ Return ONLY the JSON object, no additional text."""
         
         # Check if already extracted (skip to avoid duplicates)
         if not force:
-            existing_symptoms = get_symptoms_by_video(video_id)
-            if existing_symptoms:
-                print(f"Already extracted for video {video_id} ({len(existing_symptoms)} symptoms). Skipping.")
+            # Check if extraction was already attempted (regardless of results)
+            if transcript_data.get('extracted_at'):
+                existing_symptoms = get_symptoms_by_video(video_id)
+                symptom_count = len(existing_symptoms) if existing_symptoms else 0
+                print(f"Already extracted for video {video_id} ({symptom_count} symptoms). Skipping.")
                 return {
                     'video_id': video_id,
                     'success': True,
                     'already_existed': True,
-                    'symptoms_count': len(existing_symptoms)
+                    'symptoms_count': symptom_count
                 }
         
         # Standard separate extractions for other models
@@ -1195,6 +1197,9 @@ Return ONLY the JSON object, no additional text."""
                     print(f"  Updated comorbidity tracking")
                 except Exception as e:
                     print(f"  Could not update comorbidity: {e}")
+
+        # Mark transcript as extracted (prevents re-processing even if zero symptoms)
+        mark_transcript_extracted(video_id)
 
         return {
             'video_id': video_id,
