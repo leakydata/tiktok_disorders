@@ -979,8 +979,8 @@ Return ONLY the JSON object, no additional text."""
                 "messages": [{"role": "user", "content": prompt}],
                 "stream": False,
                 "options": {
-                    "num_ctx": 32768,  # Use larger context for combined prompts
-                    "num_predict": 8192,  # Allow longer responses
+                    "num_ctx": 65536,  # 64K context (model supports 128K)
+                    "num_predict": 12288,  # 12K tokens for detailed extraction responses
                 }
             },
             timeout=timeout,
