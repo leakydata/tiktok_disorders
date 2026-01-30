@@ -262,7 +262,19 @@ uv run python pipeline.py extract --all
 
 # Re-extract with different settings
 uv run python pipeline.py extract --all --min-confidence 0.8 --provider ollama
+
+# Skip song lyrics (default: >= 20% ratio) and short transcripts (default: < 20 words)
+uv run python pipeline.py extract --all --max-song-ratio 0.3 --min-words 30
 ```
+
+**Extract command options:**
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--max-song-ratio` | 0.2 | Skip videos with song_lyrics_ratio >= this |
+| `--min-words` | 20 | Skip transcripts with fewer words |
+| `--min-confidence` | 0.6 | Minimum confidence for symptoms |
+| `--provider` | ollama | LLM provider (ollama or anthropic) |
+| `--model` | gpt-oss:20b | LLM model name |
 
 ### Analysis and Statistics
 
@@ -569,6 +581,30 @@ This means you can:
 - `treatments` - Medications, supplements, therapies mentioned
 - `narrative_elements` - STRAIN framework indicators (self-diagnosis, doctor dismissal, stress triggers, etc.)
 
+### Symptom Categories
+The extractor classifies symptoms into these categories (defined in `extractor.py`):
+
+| Category | Description |
+|----------|-------------|
+| musculoskeletal | Joint pain, hypermobility, dislocations, subluxations, chronic pain |
+| cardiovascular | Tachycardia, palpitations, blood pressure issues, dizziness, fainting |
+| gastrointestinal | Nausea, vomiting, gastroparesis, IBS, reflux, constipation, diarrhea |
+| neurological | Brain fog, headaches, migraines, difficulty concentrating, memory issues |
+| autonomic | Temperature regulation, sweating issues, tremors, exercise intolerance |
+| allergic | Flushing, hives, itching, anaphylaxis, food sensitivities |
+| dermatological | Skin hyperextensibility, easy bruising, scarring, skin fragility, rashes |
+| respiratory | Shortness of breath, asthma-like symptoms, breathing difficulties |
+| fatigue | Chronic fatigue, post-exertional malaise, exhaustion, sleep issues |
+| gynecologic | Menstrual issues, endometriosis, pelvic pain, hormonal fluctuations, PCOS |
+| urological | Bladder issues, frequent urination, interstitial cystitis, incontinence |
+| ocular | Vision problems, dry eyes, light sensitivity, floaters, eye strain |
+| dental | TMJ, jaw pain, dental fragility, gum issues, teeth grinding |
+| psychological | Anxiety, depression, PTSD, panic attacks, mood swings |
+| immune | Frequent infections, slow healing, immune dysfunction, autoimmune symptoms |
+| other | Other symptoms not fitting above categories |
+
+To add custom categories, edit the `SYMPTOM_CATEGORIES` dictionary in `extractor.py`.
+
 ### Analysis Tables
 - `expected_symptoms` - Medical reference data for each condition (EDS, MCAS, POTS, CIRS)
 - `symptom_concordance` - How well reported symptoms match expected
@@ -648,8 +684,11 @@ uv run python pipeline.py run --urls-file urls.txt --provider ollama --model gpt
 # Extract symptoms only (if already downloaded/transcribed)
 uv run python pipeline.py extract --all --provider ollama --model gpt-oss:20b
 
-# Be more lenient with song lyrics (include up to 80% lyrics)
-uv run python pipeline.py extract --all --max-song-ratio 0.8
+# Be more lenient with song lyrics (include up to 50% lyrics)
+uv run python pipeline.py extract --all --max-song-ratio 0.5
+
+# Require longer transcripts (at least 50 words)
+uv run python pipeline.py extract --all --min-words 50
 ```
 
 ### Recommended Ollama Models
