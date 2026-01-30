@@ -918,21 +918,34 @@ def get_symptoms_by_video(video_id: int) -> List[Dict[str, Any]]:
 def insert_claimed_diagnosis(video_id: int, condition_code: str, condition_name: str,
                             confidence: float, context: Optional[str] = None,
                             **kwargs) -> int:
-    """Insert a claimed diagnosis record."""
+    """Insert a claimed diagnosis record with enhanced fields."""
     with get_connection() as conn:
         cur = conn.cursor()
+        
+        # Map is_self_diagnosed to diagnosis_status for backward compatibility
+        diagnosis_status = kwargs.get('diagnosis_status')
+        is_self_diagnosed = kwargs.get('is_self_diagnosed')
+        if diagnosis_status is None and is_self_diagnosed is not None:
+            diagnosis_status = 'self_diagnosed' if is_self_diagnosed else 'confirmed'
+        
         cur.execute("""
             INSERT INTO claimed_diagnoses (
                 video_id, condition_code, condition_name, confidence, context,
-                is_self_diagnosed, diagnosis_date_mentioned,
+                diagnosis_status, is_self_diagnosed, diagnosis_date_mentioned,
+                eds_subtype, diagnosing_specialty, sentiment, mentioned_with,
                 extractor_model, extractor_provider
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id
         """, (
             video_id, condition_code.upper(), condition_name, confidence, context,
-            kwargs.get('is_self_diagnosed'),
+            diagnosis_status,
+            is_self_diagnosed,
             kwargs.get('diagnosis_date_mentioned'),
+            kwargs.get('eds_subtype'),
+            kwargs.get('diagnosing_specialty'),
+            kwargs.get('sentiment'),
+            kwargs.get('mentioned_with', []),
             kwargs.get('extractor_model'),
             kwargs.get('extractor_provider')
         ))

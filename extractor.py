@@ -520,38 +520,97 @@ Return ONLY the JSON array, no additional text."""
 
         print(f"Extracting diagnoses from video {video_id}...")
 
-        prompt = f"""Analyze this transcript and extract any medical conditions or diagnoses that the speaker claims to have.
+        prompt = f"""Analyze this transcript and extract any medical conditions or diagnoses that the speaker claims FOR THEMSELVES (not a friend's diagnosis, not discussing the condition generally, not "I thought I had X but...").
 
-Look for mentions of:
-- EDS (Ehlers-Danlos Syndrome) - any type (hEDS, vEDS, classical, etc.)
+## CONDITION CODES (use the most specific one that applies):
+
+**Core Trifecta:**
+- EDS (Ehlers-Danlos Syndrome - any type)
 - MCAS (Mast Cell Activation Syndrome)
 - POTS (Postural Orthostatic Tachycardia Syndrome)
-- Fibromyalgia
-- CFS/ME (Chronic Fatigue Syndrome / Myalgic Encephalomyelitis)
-- CIRS (Chronic Inflammatory Response Syndrome) / Mold illness
-- Any other chronic illnesses mentioned
 
-For each claimed diagnosis, provide:
-1. **condition_code**: Abbreviation (EDS, MCAS, POTS, FIBROMYALGIA, CFS, CIRS, or OTHER)
+**Dysautonomia variants:**
+- DYSAUTONOMIA (broader than POTS)
+- IST (Inappropriate Sinus Tachycardia)
+
+**Fatigue/Pain syndromes:**
+- ME_CFS (Chronic Fatigue Syndrome / Myalgic Encephalomyelitis)
+- FIBROMYALGIA
+
+**Structural conditions:**
+- CHIARI (Chiari Malformation)
+- CCI_AAI (Craniocervical/Atlantoaxial Instability)
+- TETHERED_CORD
+
+**GI conditions:**
+- GASTROPARESIS
+- SIBO (Small Intestinal Bacterial Overgrowth)
+
+**Inflammatory/Immune:**
+- CIRS (Chronic Inflammatory Response Syndrome / Mold illness)
+- LONG_COVID
+- AUTOIMMUNE (catch-all for lupus, hashimotos, RA, etc.)
+- SFN (Small Fiber Neuropathy)
+
+**Other common comorbidities:**
+- ENDOMETRIOSIS
+- INTERSTITIAL_CYSTITIS
+- OTHER (only if nothing else fits)
+
+## For each claimed diagnosis, provide:
+
+1. **condition_code**: One of the codes above
 2. **condition_name**: Full name as the speaker calls it
-3. **confidence**: 0.0-1.0 based on how clearly they claim to have it
-4. **is_self_diagnosed**: true if they mention self-diagnosis, false if doctor-diagnosed, null if unclear
-5. **diagnosis_date_mentioned**: Any date/year mentioned for when diagnosed (or null)
-6. **context**: The quote where they mention having this condition
+3. **confidence**: 0.0-1.0 (certainty that speaker is claiming THIS diagnosis FOR THEMSELVES)
+   - 1.0: Explicitly states "I have X" or "I was diagnosed with X"
+   - 0.7-0.9: Strongly implied ("my EDS", "living with POTS")
+   - 0.5-0.7: Less certain but likely personal ("dealing with mast cell issues")
+   - Below 0.5: Don't extract - too uncertain
 
-Return a JSON array:
+4. **diagnosis_status**: One of:
+   - "confirmed" (doctor diagnosed)
+   - "self_diagnosed" (explicitly says they self-diagnosed)
+   - "suspected" (doctor suspects but not official)
+   - "clinical" (diagnosed by criteria, mentions no genetic test)
+   - "genetic" (genetically confirmed - relevant for vEDS, cEDS, etc.)
+   - "seeking" (actively trying to get diagnosed - "waiting on my EDS evaluation")
+   - "lost" (was diagnosed, doctor later dismissed it)
+   - "unclear" (can't determine)
+
+5. **eds_subtype**: If EDS, specify: "hEDS", "vEDS", "cEDS", "clEDS", "kEDS", "HSD", or null
+
+6. **diagnosis_date_mentioned**: Any date/year mentioned for when diagnosed (or null)
+
+7. **diagnosing_specialty**: Who diagnosed them (geneticist, rheumatologist, cardiologist, PCP, allergist, immunologist, neurologist, self, null)
+
+8. **sentiment**: Speaker's feeling about this diagnosis:
+   - "validated" (relieved to have an answer)
+   - "frustrated" (hard to get diagnosed, dismissed by doctors)
+   - "relieved" (finally understood)
+   - "questioning" (unsure if diagnosis is correct)
+   - "neutral" (matter-of-fact mention)
+
+9. **mentioned_with**: Array of other condition codes mentioned in same context (captures comorbidity patterns)
+
+10. **context**: The quote where they claim this diagnosis
+
+## Example:
 [
   {{
     "condition_code": "EDS",
     "condition_name": "hypermobile Ehlers-Danlos Syndrome",
     "confidence": 0.95,
-    "is_self_diagnosed": false,
+    "diagnosis_status": "clinical",
+    "eds_subtype": "hEDS",
     "diagnosis_date_mentioned": "2020",
-    "context": "I was diagnosed with hEDS in 2020 by a geneticist"
+    "diagnosing_specialty": "geneticist",
+    "sentiment": "validated",
+    "mentioned_with": ["POTS", "MCAS"],
+    "context": "I was finally diagnosed with hEDS in 2020 by a geneticist after years of being dismissed"
   }}
 ]
 
-Return ONLY the JSON array. If no diagnoses are mentioned, return an empty array [].
+Return ONLY the JSON array. If no diagnoses are claimed, return an empty array [].
 
 TRANSCRIPT:
 {transcript_text}"""
@@ -572,14 +631,23 @@ TRANSCRIPT:
             diagnosis_ids = []
             for diag in diagnoses:
                 if diag.get('confidence', 0) >= 0.5:
+                    # Map diagnosis_status to is_self_diagnosed for backward compatibility
+                    status = diag.get('diagnosis_status', 'unclear')
+                    is_self_diag = True if status == 'self_diagnosed' else (False if status in ['confirmed', 'clinical', 'genetic'] else None)
+                    
                     diag_id = insert_claimed_diagnosis(
                         video_id=video_id,
                         condition_code=diag.get('condition_code', 'OTHER'),
                         condition_name=diag.get('condition_name', 'Unknown'),
                         confidence=diag.get('confidence', 0.5),
                         context=diag.get('context'),
-                        is_self_diagnosed=diag.get('is_self_diagnosed'),
+                        diagnosis_status=status,
+                        is_self_diagnosed=diag.get('is_self_diagnosed', is_self_diag),
                         diagnosis_date_mentioned=diag.get('diagnosis_date_mentioned'),
+                        eds_subtype=diag.get('eds_subtype'),
+                        diagnosing_specialty=diag.get('diagnosing_specialty'),
+                        sentiment=diag.get('sentiment'),
+                        mentioned_with=diag.get('mentioned_with', []),
                         extractor_model=self.model,
                         extractor_provider=self.provider
                     )
@@ -928,12 +996,16 @@ For each symptom mentioned, provide:
 - context: Relevant quote
 
 ## 2. DIAGNOSES
-Medical conditions the speaker claims to have:
-- condition_code: EDS, MCAS, POTS, FIBROMYALGIA, CFS, CIRS, or OTHER
+Medical conditions the speaker claims FOR THEMSELVES (not discussing generally):
+- condition_code: One of: EDS, MCAS, POTS, DYSAUTONOMIA, IST, ME_CFS, FIBROMYALGIA, CHIARI, CCI_AAI, TETHERED_CORD, GASTROPARESIS, SIBO, CIRS, LONG_COVID, AUTOIMMUNE, SFN, ENDOMETRIOSIS, INTERSTITIAL_CYSTITIS, or OTHER
 - condition_name: Full name as speaker calls it
-- confidence: 0.0-1.0
-- is_self_diagnosed: true/false/null
+- confidence: 0.0-1.0 (1.0 = explicitly states "I have X")
+- diagnosis_status: "confirmed", "self_diagnosed", "suspected", "clinical", "genetic", "seeking", "lost", or "unclear"
+- eds_subtype: If EDS, specify "hEDS", "vEDS", "cEDS", "clEDS", "kEDS", "HSD", or null
 - diagnosis_date_mentioned: Year/date if mentioned
+- diagnosing_specialty: Who diagnosed (geneticist, rheumatologist, cardiologist, PCP, allergist, self, null)
+- sentiment: "validated", "frustrated", "relieved", "questioning", or "neutral"
+- mentioned_with: Array of other condition codes mentioned together (for comorbidity tracking)
 - context: Quote where they claim this diagnosis
 
 ## 3. TREATMENTS
@@ -1039,14 +1111,23 @@ Return ONLY the JSON object, no additional text."""
             diagnosis_ids = []
             for diag in data.get('diagnoses', []):
                 if diag.get('confidence', 0) >= 0.5:
+                    # Map diagnosis_status to is_self_diagnosed for backward compatibility
+                    status = diag.get('diagnosis_status', 'unclear')
+                    is_self_diag = True if status == 'self_diagnosed' else (False if status in ['confirmed', 'clinical', 'genetic'] else None)
+                    
                     diag_id = insert_claimed_diagnosis(
                         video_id=video_id,
                         condition_code=diag.get('condition_code', 'OTHER'),
                         condition_name=diag.get('condition_name', 'Unknown'),
                         confidence=diag.get('confidence', 0.5),
                         context=diag.get('context'),
-                        is_self_diagnosed=diag.get('is_self_diagnosed'),
+                        diagnosis_status=status,
+                        is_self_diagnosed=diag.get('is_self_diagnosed', is_self_diag),
                         diagnosis_date_mentioned=diag.get('diagnosis_date_mentioned'),
+                        eds_subtype=diag.get('eds_subtype'),
+                        diagnosing_specialty=diag.get('diagnosing_specialty'),
+                        sentiment=diag.get('sentiment'),
+                        mentioned_with=diag.get('mentioned_with', []),
                         extractor_model=self.model,
                         extractor_provider=self.provider
                     )
