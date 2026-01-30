@@ -199,10 +199,12 @@ def init_db():
                 transcribed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 processing_time_seconds REAL,
                 song_lyrics_ratio REAL DEFAULT NULL,
+                extracted_at TIMESTAMP DEFAULT NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE(video_id)
             )
         """)
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_transcripts_extracted_at ON transcripts(extracted_at)")
 
         # Symptoms table
         cur.execute("""
@@ -694,6 +696,44 @@ def update_transcript_song_lyrics_ratio(video_id: int, song_lyrics_ratio: float)
             WHERE video_id = %s
             RETURNING id
         """, (song_lyrics_ratio, video_id))
+        result = cur.fetchone()
+        return result is not None
+
+
+def mark_transcript_extracted(video_id: int) -> bool:
+    """Mark a transcript as having been processed for extraction.
+    
+    This prevents re-processing videos that yielded zero symptoms.
+    
+    Args:
+        video_id: The video ID
+    """
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE transcripts
+            SET extracted_at = CURRENT_TIMESTAMP
+            WHERE video_id = %s
+            RETURNING id
+        """, (video_id,))
+        result = cur.fetchone()
+        return result is not None
+
+
+def clear_transcript_extracted(video_id: int) -> bool:
+    """Clear the extracted_at timestamp to allow re-extraction.
+    
+    Args:
+        video_id: The video ID
+    """
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE transcripts
+            SET extracted_at = NULL
+            WHERE video_id = %s
+            RETURNING id
+        """, (video_id,))
         result = cur.fetchone()
         return result is not None
 
