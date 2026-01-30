@@ -2156,6 +2156,265 @@ def get_users_with_low_concordance(threshold: float = 0.3) -> List[Dict[str, Any
         return [dict(row) for row in cur.fetchall()]
 
 
+# =============================================================================
+# Longitudinal Tracking Update Functions
+# =============================================================================
+
+def update_user_profile(username: str) -> Dict[str, Any]:
+    """Update or create a user profile with aggregated statistics."""
+    with get_connection() as conn:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        
+        # Calculate all aggregated stats for this user
+        cur.execute("""
+            WITH user_stats AS (
+                SELECT 
+                    v.author as username,
+                    MIN(v.upload_date) as first_video_date,
+                    MAX(v.upload_date) as last_video_date,
+                    COUNT(DISTINCT v.id) as video_count,
+                    MAX(v.author_follower_count) as follower_count
+                FROM videos v
+                WHERE LOWER(v.author) = LOWER(%s)
+                GROUP BY v.author
+            ),
+            symptom_stats AS (
+                SELECT COUNT(*) as total_symptoms
+                FROM symptoms s
+                JOIN videos v ON s.video_id = v.id
+                WHERE LOWER(v.author) = LOWER(%s)
+            ),
+            diagnosis_stats AS (
+                SELECT 
+                    COUNT(DISTINCT cd.condition_code) as unique_diagnoses,
+                    MODE() WITHIN GROUP (ORDER BY cd.condition_code) as primary_condition
+                FROM claimed_diagnoses cd
+                JOIN videos v ON cd.video_id = v.id
+                WHERE LOWER(v.author) = LOWER(%s)
+            ),
+            concordance_stats AS (
+                SELECT 
+                    AVG(sc.concordance_score) as avg_concordance,
+                    AVG(sc.core_symptom_score) as avg_core_score
+                FROM symptom_concordance sc
+                JOIN videos v ON sc.video_id = v.id
+                WHERE LOWER(v.author) = LOWER(%s)
+            ),
+            narrative_stats AS (
+                SELECT 
+                    COUNT(*) as total_narratives,
+                    SUM(CASE WHEN mentions_self_diagnosis THEN 1 ELSE 0 END) as self_diag_count,
+                    SUM(CASE WHEN mentions_professional_diagnosis THEN 1 ELSE 0 END) as prof_diag_count,
+                    SUM(CASE WHEN mentions_doctor_dismissal THEN 1 ELSE 0 END) as dismissal_count,
+                    SUM(CASE WHEN mentions_stress_triggers THEN 1 ELSE 0 END) as stress_count
+                FROM narrative_elements ne
+                JOIN videos v ON ne.video_id = v.id
+                WHERE LOWER(v.author) = LOWER(%s)
+            )
+            SELECT 
+                us.*,
+                ss.total_symptoms,
+                ds.unique_diagnoses,
+                ds.primary_condition,
+                cs.avg_concordance,
+                cs.avg_core_score,
+                ns.total_narratives,
+                ns.self_diag_count,
+                ns.prof_diag_count,
+                ns.dismissal_count,
+                ns.stress_count,
+                CASE WHEN ns.total_narratives > 0 
+                     THEN ns.self_diag_count::float / ns.total_narratives 
+                     ELSE NULL END as self_diagnosis_ratio,
+                CASE WHEN ns.total_narratives > 0 
+                     THEN ns.prof_diag_count::float / ns.total_narratives 
+                     ELSE NULL END as professional_diagnosis_ratio
+            FROM user_stats us
+            CROSS JOIN symptom_stats ss
+            CROSS JOIN diagnosis_stats ds
+            CROSS JOIN concordance_stats cs
+            CROSS JOIN narrative_stats ns
+        """, (username, username, username, username, username))
+        
+        stats = cur.fetchone()
+        if not stats:
+            return None
+        
+        # Determine flags
+        is_low_concordance = stats['avg_concordance'] is not None and stats['avg_concordance'] < 0.3
+        
+        # Upsert the profile
+        cur.execute("""
+            INSERT INTO user_profiles (
+                username, first_video_date, last_video_date, video_count,
+                total_symptoms_reported, unique_diagnoses_count,
+                avg_concordance_score, avg_core_symptom_score, primary_condition,
+                follower_count, self_diagnosis_ratio, professional_diagnosis_ratio,
+                doctor_dismissal_mentions, stress_trigger_mentions,
+                is_flagged_low_concordance, last_updated
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+            ON CONFLICT (username) DO UPDATE SET
+                first_video_date = EXCLUDED.first_video_date,
+                last_video_date = EXCLUDED.last_video_date,
+                video_count = EXCLUDED.video_count,
+                total_symptoms_reported = EXCLUDED.total_symptoms_reported,
+                unique_diagnoses_count = EXCLUDED.unique_diagnoses_count,
+                avg_concordance_score = EXCLUDED.avg_concordance_score,
+                avg_core_symptom_score = EXCLUDED.avg_core_symptom_score,
+                primary_condition = EXCLUDED.primary_condition,
+                follower_count = EXCLUDED.follower_count,
+                self_diagnosis_ratio = EXCLUDED.self_diagnosis_ratio,
+                professional_diagnosis_ratio = EXCLUDED.professional_diagnosis_ratio,
+                doctor_dismissal_mentions = EXCLUDED.doctor_dismissal_mentions,
+                stress_trigger_mentions = EXCLUDED.stress_trigger_mentions,
+                is_flagged_low_concordance = EXCLUDED.is_flagged_low_concordance,
+                last_updated = CURRENT_TIMESTAMP
+            RETURNING *
+        """, (
+            stats['username'], stats['first_video_date'], stats['last_video_date'],
+            stats['video_count'], stats['total_symptoms'], stats['unique_diagnoses'],
+            stats['avg_concordance'], stats['avg_core_score'], stats['primary_condition'],
+            stats['follower_count'], stats['self_diagnosis_ratio'], stats['professional_diagnosis_ratio'],
+            stats['dismissal_count'], stats['stress_count'], is_low_concordance
+        ))
+        
+        result = cur.fetchone()
+        conn.commit()
+        return dict(result) if result else None
+
+
+def update_diagnosis_timeline(username: str) -> List[Dict[str, Any]]:
+    """Update the diagnosis timeline for a user."""
+    with get_connection() as conn:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        
+        # Get diagnosis history
+        cur.execute("""
+            WITH diagnosis_history AS (
+                SELECT 
+                    v.author as username,
+                    cd.condition_code,
+                    MIN(v.upload_date) as first_mentioned,
+                    MAX(v.upload_date) as last_mentioned,
+                    COUNT(*) as mention_count,
+                    BOOL_OR(cd.is_self_diagnosed) as was_self_diagnosed,
+                    ROW_NUMBER() OVER (ORDER BY MIN(v.upload_date)) as diagnosis_order
+                FROM claimed_diagnoses cd
+                JOIN videos v ON cd.video_id = v.id
+                WHERE LOWER(v.author) = LOWER(%s) AND v.upload_date IS NOT NULL
+                GROUP BY v.author, cd.condition_code
+            )
+            SELECT 
+                dh.*,
+                LAG(condition_code) OVER (ORDER BY first_mentioned) as previous_diagnosis,
+                LAG(first_mentioned) OVER (ORDER BY first_mentioned) as previous_date
+            FROM diagnosis_history dh
+            ORDER BY first_mentioned
+        """, (username,))
+        
+        results = []
+        for row in cur.fetchall():
+            days_since = None
+            if row['previous_date'] and row['first_mentioned']:
+                days_since = (row['first_mentioned'] - row['previous_date']).days
+            
+            cur.execute("""
+                INSERT INTO diagnosis_timeline (
+                    username, condition_code, first_mentioned, last_mentioned,
+                    mention_count, was_self_diagnosed, diagnosis_order,
+                    days_since_previous_diagnosis, previous_diagnosis
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (username, condition_code) DO UPDATE SET
+                    last_mentioned = EXCLUDED.last_mentioned,
+                    mention_count = EXCLUDED.mention_count,
+                    was_self_diagnosed = EXCLUDED.was_self_diagnosed
+                RETURNING *
+            """, (
+                row['username'], row['condition_code'], row['first_mentioned'],
+                row['last_mentioned'], row['mention_count'], row['was_self_diagnosed'],
+                row['diagnosis_order'], days_since, row['previous_diagnosis']
+            ))
+            results.append(dict(cur.fetchone()))
+        
+        conn.commit()
+        return results
+
+
+def update_symptom_consistency(username: str) -> List[Dict[str, Any]]:
+    """Update symptom consistency tracking for a user."""
+    with get_connection() as conn:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        
+        cur.execute("""
+            SELECT 
+                %s as username,
+                s.symptom,
+                s.category,
+                COUNT(*) as total_mentions,
+                COUNT(DISTINCT s.severity) as severity_variations,
+                ARRAY_AGG(DISTINCT s.severity) FILTER (WHERE s.severity IS NOT NULL) as all_severities,
+                MIN(v.upload_date) as first_mentioned,
+                MAX(v.upload_date) as last_mentioned,
+                AVG(s.confidence) as avg_confidence
+            FROM symptoms s
+            JOIN videos v ON s.video_id = v.id
+            WHERE LOWER(v.author) = LOWER(%s)
+            GROUP BY s.symptom, s.category
+        """, (username, username))
+        
+        results = []
+        for row in cur.fetchall():
+            is_inconsistent = row['severity_variations'] > 1
+            
+            cur.execute("""
+                INSERT INTO symptom_consistency (
+                    username, symptom, category, total_mentions,
+                    severity_variations, all_severities, first_mentioned,
+                    last_mentioned, avg_confidence, is_inconsistent
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (username, symptom) DO UPDATE SET
+                    total_mentions = EXCLUDED.total_mentions,
+                    severity_variations = EXCLUDED.severity_variations,
+                    all_severities = EXCLUDED.all_severities,
+                    last_mentioned = EXCLUDED.last_mentioned,
+                    avg_confidence = EXCLUDED.avg_confidence,
+                    is_inconsistent = EXCLUDED.is_inconsistent
+                RETURNING *
+            """, (
+                row['username'], row['symptom'], row['category'],
+                row['total_mentions'], row['severity_variations'],
+                row['all_severities'], row['first_mentioned'],
+                row['last_mentioned'], row['avg_confidence'], is_inconsistent
+            ))
+            results.append(dict(cur.fetchone()))
+        
+        conn.commit()
+        return results
+
+
+def refresh_all_user_profiles() -> int:
+    """Refresh all user profiles in the database."""
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT DISTINCT author FROM videos WHERE author IS NOT NULL")
+        usernames = [row[0] for row in cur.fetchall()]
+    
+    count = 0
+    for username in usernames:
+        try:
+            update_user_profile(username)
+            update_diagnosis_timeline(username)
+            update_symptom_consistency(username)
+            count += 1
+        except Exception as e:
+            print(f"Error updating {username}: {e}")
+    
+    return count
+
+
 if __name__ == '__main__':
     print("Initializing database...")
     init_db()

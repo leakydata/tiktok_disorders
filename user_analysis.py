@@ -335,6 +335,187 @@ def print_symptom_consistency(username: str):
     print("\n" + "=" * 70)
 
 
+def detect_narrative_inconsistencies(username: str) -> Dict[str, Any]:
+    """Detect narrative inconsistencies for a user (conflicting claims across videos)."""
+    with get_connection() as conn:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        
+        inconsistencies = {
+            'username': username,
+            'diagnosis_inconsistencies': [],
+            'treatment_inconsistencies': [],
+            'severity_inconsistencies': [],
+            'total_flags': 0
+        }
+        
+        # Check for diagnosis type conflicts (self vs professional across videos)
+        cur.execute("""
+            SELECT 
+                cd.condition_code,
+                BOOL_OR(cd.is_self_diagnosed) as ever_self_diagnosed,
+                BOOL_OR(NOT cd.is_self_diagnosed) as ever_professionally_diagnosed,
+                COUNT(DISTINCT CASE WHEN cd.is_self_diagnosed THEN v.id END) as self_diag_videos,
+                COUNT(DISTINCT CASE WHEN NOT cd.is_self_diagnosed THEN v.id END) as prof_diag_videos
+            FROM claimed_diagnoses cd
+            JOIN videos v ON cd.video_id = v.id
+            WHERE LOWER(v.author) = LOWER(%s)
+            GROUP BY cd.condition_code
+            HAVING BOOL_OR(cd.is_self_diagnosed) AND BOOL_OR(NOT cd.is_self_diagnosed)
+        """, (username,))
+        
+        for row in cur.fetchall():
+            inconsistencies['diagnosis_inconsistencies'].append({
+                'type': 'diagnosis_source_conflict',
+                'condition': row['condition_code'],
+                'description': f"Claims both self-diagnosed ({row['self_diag_videos']} videos) and professionally diagnosed ({row['prof_diag_videos']} videos)",
+                'severity': 'high'
+            })
+        
+        # Check for treatment effectiveness conflicts
+        cur.execute("""
+            SELECT 
+                t.treatment_name,
+                ARRAY_AGG(DISTINCT t.effectiveness) as effectiveness_claims,
+                COUNT(DISTINCT t.effectiveness) as claim_variations
+            FROM treatments t
+            JOIN videos v ON t.video_id = v.id
+            WHERE LOWER(v.author) = LOWER(%s) AND t.effectiveness IS NOT NULL
+            GROUP BY t.treatment_name
+            HAVING COUNT(DISTINCT t.effectiveness) > 1
+        """, (username,))
+        
+        for row in cur.fetchall():
+            claims = [str(c) for c in row['effectiveness_claims'] if c]
+            # Flag if dramatically contradictory (helpful vs harmful)
+            helpful = any('helpful' in str(c).lower() for c in claims)
+            harmful = any('worse' in str(c).lower() or 'harmful' in str(c).lower() for c in claims)
+            
+            if helpful and harmful:
+                inconsistencies['treatment_inconsistencies'].append({
+                    'type': 'treatment_effectiveness_conflict',
+                    'treatment': row['treatment_name'],
+                    'claims': claims,
+                    'description': f"Reports both helpful AND harmful effects for same treatment",
+                    'severity': 'high'
+                })
+            else:
+                inconsistencies['treatment_inconsistencies'].append({
+                    'type': 'treatment_effectiveness_variation',
+                    'treatment': row['treatment_name'],
+                    'claims': claims,
+                    'description': f"Varying effectiveness reports: {', '.join(claims)}",
+                    'severity': 'low'
+                })
+        
+        # Check for symptom severity inconsistencies (same symptom, wildly different severities)
+        cur.execute("""
+            SELECT 
+                s.symptom,
+                ARRAY_AGG(DISTINCT s.severity) as severities,
+                COUNT(DISTINCT s.severity) as severity_count
+            FROM symptoms s
+            JOIN videos v ON s.video_id = v.id
+            WHERE LOWER(v.author) = LOWER(%s) AND s.severity IS NOT NULL
+            GROUP BY s.symptom
+            HAVING COUNT(DISTINCT s.severity) > 1
+        """, (username,))
+        
+        for row in cur.fetchall():
+            severities = [str(s) for s in row['severities'] if s]
+            # Flag if ranges from mild to severe
+            has_mild = 'mild' in severities
+            has_severe = 'severe' in severities
+            
+            if has_mild and has_severe:
+                inconsistencies['severity_inconsistencies'].append({
+                    'type': 'severity_range_extreme',
+                    'symptom': row['symptom'],
+                    'severities': severities,
+                    'description': f"Reports same symptom as both 'mild' and 'severe'",
+                    'severity': 'medium'
+                })
+        
+        # Count total flags
+        inconsistencies['total_flags'] = (
+            len(inconsistencies['diagnosis_inconsistencies']) +
+            len([t for t in inconsistencies['treatment_inconsistencies'] if t['severity'] == 'high']) +
+            len(inconsistencies['severity_inconsistencies'])
+        )
+        
+        return inconsistencies
+
+
+def print_narrative_inconsistencies(username: str):
+    """Print narrative inconsistency analysis for a user."""
+    analysis = detect_narrative_inconsistencies(username)
+    
+    print("=" * 70)
+    print(f"NARRATIVE CONSISTENCY ANALYSIS: @{username}")
+    print("=" * 70)
+    
+    if analysis['total_flags'] == 0:
+        print("\n✅ No significant inconsistencies detected.")
+        print("=" * 70)
+        return
+    
+    print(f"\n⚠️ TOTAL FLAGS: {analysis['total_flags']}")
+    
+    if analysis['diagnosis_inconsistencies']:
+        print(f"\n🏥 DIAGNOSIS INCONSISTENCIES ({len(analysis['diagnosis_inconsistencies'])})")
+        for inc in analysis['diagnosis_inconsistencies']:
+            print(f"   🔴 {inc['condition']}: {inc['description']}")
+    
+    if analysis['treatment_inconsistencies']:
+        high_sev = [t for t in analysis['treatment_inconsistencies'] if t['severity'] == 'high']
+        low_sev = [t for t in analysis['treatment_inconsistencies'] if t['severity'] == 'low']
+        
+        if high_sev:
+            print(f"\n💊 TREATMENT CONFLICTS (HIGH SEVERITY)")
+            for inc in high_sev:
+                print(f"   🔴 {inc['treatment']}: {inc['description']}")
+        
+        if low_sev:
+            print(f"\n💊 TREATMENT VARIATIONS (LOW SEVERITY)")
+            for inc in low_sev[:5]:
+                print(f"   🟡 {inc['treatment']}: {inc['description']}")
+    
+    if analysis['severity_inconsistencies']:
+        print(f"\n📊 SEVERITY INCONSISTENCIES ({len(analysis['severity_inconsistencies'])})")
+        for inc in analysis['severity_inconsistencies'][:10]:
+            print(f"   🟡 {inc['symptom']}: {inc['description']}")
+    
+    print("\n" + "=" * 70)
+
+
+def refresh_user_data(username: str):
+    """Refresh all longitudinal tracking data for a user."""
+    from database import update_user_profile, update_diagnosis_timeline, update_symptom_consistency
+    
+    print(f"Refreshing data for @{username}...")
+    
+    profile = update_user_profile(username)
+    if profile:
+        print(f"   ✓ User profile updated")
+    
+    timeline = update_diagnosis_timeline(username)
+    print(f"   ✓ Diagnosis timeline updated ({len(timeline)} entries)")
+    
+    consistency = update_symptom_consistency(username)
+    print(f"   ✓ Symptom consistency updated ({len(consistency)} symptoms)")
+    
+    return {'profile': profile, 'timeline': timeline, 'consistency': consistency}
+
+
+def refresh_all_data():
+    """Refresh longitudinal tracking data for all users."""
+    from database import refresh_all_user_profiles
+    
+    print("Refreshing all user profiles...")
+    count = refresh_all_user_profiles()
+    print(f"✓ Updated {count} user profiles")
+    return count
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="User-level analysis for social contagion research"
@@ -370,6 +551,14 @@ def main():
     
     # Summary
     subparsers.add_parser('summary', help='Show summary of all users')
+    
+    # Narrative inconsistencies
+    inconsist_parser = subparsers.add_parser('inconsistencies', help='Detect narrative inconsistencies')
+    inconsist_parser.add_argument('username', help='TikTok username')
+    
+    # Refresh user data
+    refresh_parser = subparsers.add_parser('refresh', help='Refresh longitudinal tracking data')
+    refresh_parser.add_argument('--username', help='Specific user (omit for all users)')
     
     args = parser.parse_args()
     
@@ -411,6 +600,16 @@ def main():
         
         if len(users) > 50:
             print(f"\n... and {len(users) - 50} more users")
+    
+    elif args.command == 'inconsistencies':
+        username = args.username.lstrip('@')
+        print_narrative_inconsistencies(username)
+    
+    elif args.command == 'refresh':
+        if args.username:
+            refresh_user_data(args.username.lstrip('@'))
+        else:
+            refresh_all_data()
     
     else:
         parser.print_help()

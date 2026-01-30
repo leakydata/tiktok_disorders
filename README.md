@@ -300,6 +300,61 @@ The `--detailed` stats show:
 - Top treatments and effectiveness ratings
 - Comorbidity patterns
 
+### User-Level Analysis (Social Contagion Research)
+
+The `user_analysis.py` module provides comprehensive tools for studying individual creators' health narratives over time - essential for social contagion research.
+
+```bash
+# View comprehensive profile for a user
+uv run python user_analysis.py profile @username
+
+# View chronological timeline of a user's health narrative
+uv run python user_analysis.py timeline @username
+
+# Check symptom reporting consistency
+uv run python user_analysis.py consistency @username
+
+# Detect narrative inconsistencies (conflicting claims across videos)
+uv run python user_analysis.py inconsistencies @username
+
+# Overall concordance report (all users)
+uv run python user_analysis.py concordance-report
+
+# Find users with low concordance scores (potential social contagion)
+uv run python user_analysis.py low-concordance --threshold 0.3
+
+# Analyze diagnosis acquisition patterns
+uv run python user_analysis.py diagnosis-patterns
+
+# Summary of all users
+uv run python user_analysis.py summary
+
+# Export all user profiles to JSON
+uv run python user_analysis.py export-all --output data/exports/user_profiles.json
+
+# Refresh longitudinal tracking data
+uv run python user_analysis.py refresh                    # All users
+uv run python user_analysis.py refresh --username @user   # Specific user
+```
+
+**User Profile includes:**
+- Video count and date range
+- All claimed diagnoses with first-mention dates
+- Top symptoms with frequency and severity variations
+- Concordance scores per condition
+- STRAIN narrative indicators
+- Treatment mentions and effectiveness
+
+**Concordance Analysis:**
+- Compares reported symptoms to expected symptoms for each claimed condition
+- Core symptom score (did they report the defining symptoms?)
+- Flags users with consistently low concordance (< 0.3)
+
+**Narrative Inconsistencies Detection:**
+- Diagnosis source conflicts (same condition claimed as both self-diagnosed AND professionally diagnosed)
+- Treatment effectiveness conflicts (same treatment reported as both helpful AND harmful)
+- Symptom severity inconsistencies (same symptom reported as "mild" in one video, "severe" in another)
+
 ### Generate Reports
 
 ```bash
@@ -615,6 +670,11 @@ To add custom categories, edit the `SYMPTOM_CATEGORIES` dictionary in `extractor
 - `symptom_concordance` - How well reported symptoms match expected
 - `comorbidity_pairs` - Which conditions appear together
 - `transcript_quality` - Quality metrics for each transcript
+
+### Longitudinal Tracking Tables (for Social Contagion Research)
+- `user_profiles` - Aggregated statistics per creator (concordance, STRAIN indicators, flags)
+- `diagnosis_timeline` - When each user first claimed each diagnosis, diagnosis order, time between
+- `symptom_consistency` - Tracks severity reporting consistency per symptom per user
 
 ### Progress Tables
 - `processing_runs` - Track batch processing runs
