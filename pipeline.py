@@ -485,10 +485,12 @@ def cmd_extract(args):
         max_song_ratio=args.max_song_ratio
     )
 
+    min_words = getattr(args, 'min_words', 20)
+    
     if args.video_id:
         video_ids = [args.video_id]
     elif args.all:
-        # Find videos with transcripts but no symptoms, excluding song lyrics
+        # Find videos with transcripts but no symptoms, excluding song lyrics and short transcripts
         with get_connection() as conn:
             cur = conn.cursor()
             cur.execute("""
@@ -497,28 +499,32 @@ def cmd_extract(args):
                 LEFT JOIN symptoms s ON t.video_id = s.video_id
                 WHERE s.id IS NULL
                   AND (t.song_lyrics_ratio IS NULL OR t.song_lyrics_ratio < %s)
-            """, (args.max_song_ratio,))
+                  AND (t.word_count IS NULL OR t.word_count >= %s)
+            """, (args.max_song_ratio, min_words))
             video_ids = [row[0] for row in cur.fetchall()]
             
-            # Also count how many were skipped due to song lyrics
+            # Count how many were skipped
             cur.execute("""
-                SELECT COUNT(*)
+                SELECT 
+                    COUNT(*) FILTER (WHERE t.song_lyrics_ratio >= %s) as skipped_lyrics,
+                    COUNT(*) FILTER (WHERE t.word_count < %s) as skipped_short
                 FROM transcripts t
                 LEFT JOIN symptoms s ON t.video_id = s.video_id
                 WHERE s.id IS NULL
-                  AND t.song_lyrics_ratio >= %s
-            """, (args.max_song_ratio,))
-            skipped_count = cur.fetchone()[0]
+            """, (args.max_song_ratio, min_words))
+            row = cur.fetchone()
+            skipped_lyrics = row[0]
+            skipped_short = row[1]
 
         if not video_ids:
             print("All transcripts already processed!")
-            if skipped_count > 0:
-                print(f"  ({skipped_count} skipped due to song_lyrics_ratio >= {args.max_song_ratio})")
+            if skipped_lyrics > 0 or skipped_short > 0:
+                print(f"  (Skipped: {skipped_lyrics} song lyrics, {skipped_short} too short)")
             return 0
 
         print(f"Found {len(video_ids)} video(s) to extract symptoms from")
-        if skipped_count > 0:
-            print(f"  ({skipped_count} skipped due to song_lyrics_ratio >= {args.max_song_ratio})")
+        if skipped_lyrics > 0 or skipped_short > 0:
+            print(f"  (Skipped: {skipped_lyrics} song lyrics, {skipped_short} too short < {min_words} words)")
     else:
         print("Error: Provide --video-id or --all")
         return 1
@@ -788,6 +794,8 @@ Examples:
     ex_parser.add_argument('--no-parallel', action='store_true', help='Disable parallel extraction')
     ex_parser.add_argument('--max-song-ratio', type=float, default=0.2,
                            help='Skip videos with song_lyrics_ratio >= this (default: 0.2)')
+    ex_parser.add_argument('--min-words', type=int, default=20,
+                           help='Skip transcripts with fewer than this many words (default: 20)')
     ex_parser.set_defaults(func=cmd_extract)
 
     # --- analyze subcommand ---
