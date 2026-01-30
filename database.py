@@ -985,6 +985,227 @@ def get_expected_symptoms(condition_code: str) -> Dict[str, List[str]]:
 # Concordance Analysis (NEW)
 # =============================================================================
 
+# Symptom synonym mappings for better concordance matching
+# Aligned with extractor.py SYMPTOM_CATEGORIES for the EDS/MCAS/POTS space
+SYMPTOM_SYNONYMS = {
+    # === MUSCULOSKELETAL & HYPERMOBILITY ===
+    'hypermobility': ['joint laxity', 'loose joints', 'bendy', 'flexible', 'hyperextension', 'beighton'],
+    'joint': ['joints', 'articulation'],
+    'subluxation': ['subluxations', 'partial dislocation', 'slipping', 'unstable joint'],
+    'dislocation': ['dislocations', 'joint dislocation', 'popping out'],
+    'instability': ['unstable', 'laxity', 'loose', 'hypermobile'],
+    'joint pain': ['arthralgia', 'joints hurt', 'joint ache', 'painful joints'],
+    'muscle spasm': ['muscle spasms', 'cramping', 'muscle cramps', 'spasms'],
+    
+    # === CRANIOCERVICAL ===
+    'cci': ['craniocervical instability', 'cranial instability'],
+    'aai': ['atlantoaxial instability', 'c1 c2'],
+    'chiari': ['chiari malformation', 'brain herniation', 'cerebellar'],
+    'tethered cord': ['tethered spinal cord', 'filum terminale'],
+    
+    # === CARDIOVASCULAR & POTS ===
+    'tachycardia': ['rapid heart rate', 'heart racing', 'fast heart', 'high heart rate'],
+    'heart racing': ['rapid heart rate', 'tachycardia', 'palpitations', 'heart pounding'],
+    'palpitations': ['heart racing', 'rapid heart rate', 'heart pounding', 'heart flutter'],
+    'blood pressure': ['bp', 'hypotension', 'hypertension', 'low bp', 'high bp'],
+    'chest pain': ['chest tightness', 'chest pressure', 'angina'],
+    
+    # === ORTHOSTATIC / POTS ===
+    'dizziness': ['dizzy', 'lightheaded', 'lightheadedness', 'vertigo', 'woozy'],
+    'lightheadedness': ['lightheaded', 'dizziness', 'dizzy', 'faint feeling'],
+    'fainting': ['syncope', 'faint', 'passed out', 'blackout', 'loss of consciousness'],
+    'presyncope': ['near fainting', 'almost fainted', 'graying out', 'near syncope'],
+    'blood pooling': ['venous pooling', 'pooling', 'legs turn purple', 'mottled'],
+    'orthostatic': ['standing', 'postural', 'position change', 'upright'],
+    'pots': ['postural tachycardia', 'orthostatic tachycardia'],
+    
+    # === AUTONOMIC ===
+    'dysautonomia': ['autonomic dysfunction', 'autonomic', 'ans dysfunction'],
+    'adrenaline': ['epinephrine', 'adrenaline surge', 'hyperadrenergic', 'fight or flight'],
+    
+    # === THERMOREGULATION ===
+    'raynaud': ['raynauds', 'fingers turn white', 'fingers turn blue', 'cold fingers'],
+    'temperature': ['thermoregulation', 'heat intolerance', 'cold intolerance', 'overheating'],
+    'sweating': ['hyperhidrosis', 'night sweats', 'excessive sweating'],
+    
+    # === GASTROINTESTINAL ===
+    'gastrointestinal': ['abdominal pain', 'stomach', 'nausea', 'diarrhea', 'constipation', 'bloating', 'gi', 'digestive'],
+    'stomach': ['gastrointestinal', 'abdominal', 'nausea', 'gi issues', 'digestive', 'gastric'],
+    'gastroparesis': ['delayed gastric emptying', 'stomach emptying', 'gp', 'motility'],
+    'motility': ['dysmotility', 'gi motility', 'slow motility', 'gastroparesis'],
+    'sibo': ['small intestinal bacterial overgrowth', 'bacterial overgrowth'],
+    'reflux': ['gerd', 'acid reflux', 'heartburn'],
+    'nausea': ['nauseous', 'queasy', 'sick to stomach'],
+    'bloating': ['bloated', 'distension', 'abdominal distension', 'pregnant belly'],
+    'food sensitivity': ['food reactions', 'food intolerance', 'food allergy', 'dietary', 'food triggers'],
+    'food intolerance': ['food reactions', 'food sensitivity', 'food allergy', 'cannot tolerate'],
+    'malabsorption': ['not absorbing', 'nutrient deficiency', 'cannot absorb'],
+    
+    # === MAST CELL / ALLERGIC ===
+    'flushing': ['facial flushing', 'face flushing', 'skin flushing', 'red face', 'flush'],
+    'facial flushing': ['flushing', 'skin flushing', 'face on fire'],
+    'hives': ['urticaria', 'skin rash', 'welts', 'raised welts'],
+    'itching': ['itchy', 'pruritus', 'skin itching'],
+    'swelling': ['angioedema', 'edema', 'swollen', 'inflammation'],
+    'anaphylaxis': ['anaphylactic', 'severe allergic', 'anaphylactoid'],
+    'histamine': ['histamine reaction', 'histamine intolerance', 'mast cell'],
+    'mcas': ['mast cell activation', 'mast cell', 'mast cell disease'],
+    'chemical sensitivity': ['mcs', 'fragrance sensitivity', 'chemical intolerance', 'smell sensitivity'],
+    'medication sensitivity': ['drug sensitivity', 'medication reactions', 'med sensitivity'],
+    'reaction': ['allergic reaction', 'mast cell reaction', 'histamine reaction', 'reacting'],
+    'dermatographia': ['skin writing', 'dermatographic'],
+    
+    # === DERMATOLOGICAL ===
+    'bruising': ['bruise', 'bruises', 'easy bruising', 'contusion'],
+    'stretch marks': ['striae', 'skin marks'],
+    'scarring': ['scars', 'abnormal scars', 'atrophic scars', 'poor healing'],
+    'skin fragility': ['thin skin', 'fragile skin', 'skin tears'],
+    
+    # === RESPIRATORY ===
+    'wheezing': ['wheeze', 'asthma', 'bronchospasm'],
+    'breathing': ['dyspnea', 'shortness of breath', 'air hunger', 'breathless'],
+    'throat': ['throat tightness', 'globus', 'lump in throat'],
+    
+    # === SINUS / ENT ===
+    'sinus': ['nasal congestion', 'sinusitis', 'sinus congestion', 'nasal', 'sinuses'],
+    'sinusitis': ['sinus', 'nasal congestion', 'chronic sinusitis', 'sinus infection'],
+    'nasal congestion': ['sinus', 'stuffy nose', 'blocked nose', 'congestion'],
+    'rhinitis': ['nasal congestion', 'runny nose', 'sinus', 'nasal inflammation'],
+    'tinnitus': ['ear ringing', 'ringing ears', 'ears ringing'],
+    'ear': ['ears', 'ear fullness', 'ear pain', 'eustachian'],
+    'post nasal drip': ['drainage', 'nasal drip', 'constant drainage'],
+    
+    # === NEUROLOGICAL ===
+    'headache': ['headaches', 'migraine', 'head pain', 'cephalalgia'],
+    'migraine': ['headache', 'headaches', 'migraines'],
+    'neuropathy': ['nerve pain', 'peripheral neuropathy', 'small fiber neuropathy', 'sfn'],
+    'tingling': ['paresthesia', 'pins and needles', 'numbness', 'prickling'],
+    'numbness': ['numb', 'loss of sensation', 'tingling'],
+    'burning': ['burning pain', 'burning sensation', 'nerves on fire'],
+    'tremor': ['tremors', 'shaking', 'trembling'],
+    
+    # === COGNITIVE ===
+    'brain fog': ['cognitive dysfunction', 'mental fog', 'foggy', 'confusion', 'concentration', 'cognitive'],
+    'memory': ['memory issues', 'forgetful', 'memory problems', 'forgetting'],
+    'concentration': ['focus', 'attention', 'cannot concentrate', 'distracted'],
+    'word finding': ['word finding difficulty', 'losing words', 'cannot find words'],
+    'dissociation': ['dissociating', 'dpdr', 'depersonalization', 'derealization'],
+    
+    # === FATIGUE & PEM ===
+    'fatigue': ['exhaustion', 'tired', 'low energy', 'chronic fatigue', 'fatigued', 'wiped out'],
+    'exhaustion': ['fatigue', 'tired', 'wiped out', 'depleted'],
+    'pem': ['post exertional malaise', 'crash', 'payback', 'post exertional'],
+    'crash': ['crashes', 'crashing', 'pem', 'flare'],
+    'flare': ['flares', 'flare up', 'flaring', 'symptom flare'],
+    
+    # === SLEEP ===
+    'insomnia': ['cannot sleep', 'sleep issues', 'sleep problems'],
+    'sleep': ['sleeping', 'rest', 'unrefreshing sleep'],
+    
+    # === PAIN ===
+    'pain': ['ache', 'hurts', 'painful', 'chronic pain', 'aching'],
+    'widespread pain': ['all over pain', 'total body pain', 'diffuse pain', 'everywhere hurts'],
+    'allodynia': ['pain from touch', 'touch hurts', 'hypersensitive'],
+    'hyperalgesia': ['increased pain', 'pain amplification', 'extra sensitive'],
+    
+    # === BLADDER / UROLOGICAL ===
+    'bladder': ['urinary', 'interstitial cystitis', 'bladder pain', 'ic', 'bladder issues'],
+    'interstitial cystitis': ['bladder pain', 'bladder issues', 'ic', 'painful bladder'],
+    'urgency': ['urinary urgency', 'frequent urination', 'always peeing'],
+    
+    # === GYNECOLOGIC ===
+    'menstrual': ['period', 'periods', 'menstruation', 'cycle'],
+    'endometriosis': ['endo', 'endometrial'],
+    'pelvic pain': ['pelvic', 'lower abdominal pain'],
+    'pcos': ['polycystic ovarian', 'polycystic ovary'],
+    
+    # === OCULAR ===
+    'dry eyes': ['eye dryness', 'eyes dry'],
+    'photophobia': ['light sensitivity', 'light sensitive', 'bright lights hurt'],
+    'blurry vision': ['blurred vision', 'vision problems', 'cannot focus'],
+    
+    # === DENTAL / TMJ ===
+    'tmj': ['tmd', 'jaw pain', 'temporomandibular', 'jaw'],
+    'jaw': ['jaw pain', 'tmj', 'jaw clicking', 'jaw locking'],
+    'bruxism': ['teeth grinding', 'grinding teeth', 'clenching'],
+}
+
+# Condition names that should NOT be counted as symptoms
+# (Sometimes the LLM extracts the diagnosis itself as a symptom)
+CONDITION_NAME_PATTERNS = {
+    'mast cell activation', 'mcas', 'mast cell disease', 'mast cell disorder',
+    'ehlers danlos', 'eds', 'hypermobility syndrome', 'heds', 'veds', 'ceds',
+    'pots', 'postural orthostatic tachycardia', 'postural tachycardia',
+    'dysautonomia', 'autonomic dysfunction',
+    'fibromyalgia', 'fibro',
+    'chronic fatigue syndrome', 'cfs', 'me/cfs', 'mecfs',
+    'gastroparesis',  # This is both a condition and symptom - keep for now
+    'endometriosis', 'endo',
+    'interstitial cystitis',  # Both condition and symptom
+    'chiari', 'chiari malformation',
+    'craniocervical instability', 'cci',
+    'atlantoaxial instability', 'aai',
+    'small fiber neuropathy', 'sfn',
+    'long covid', 'post covid',
+}
+
+
+def _is_condition_name(symptom: str) -> bool:
+    """Check if the 'symptom' is actually a condition name, not a symptom."""
+    symptom_lower = symptom.lower().strip()
+    for pattern in CONDITION_NAME_PATTERNS:
+        if pattern in symptom_lower or symptom_lower in pattern:
+            # But allow if it includes actual symptom descriptors
+            symptom_words = set(symptom_lower.split())
+            symptom_descriptors = {'pain', 'ache', 'fatigue', 'tired', 'dizzy', 
+                                   'nausea', 'flare', 'reaction', 'episode'}
+            if symptom_words & symptom_descriptors:
+                return False  # Has symptom-like words, keep it
+            return True
+    return False
+
+
+def _symptom_matches(reported: str, expected: str) -> bool:
+    """Check if a reported symptom matches an expected symptom using fuzzy matching."""
+    reported = reported.lower().strip()
+    expected = expected.lower().strip()
+    
+    # Direct substring match
+    if expected in reported or reported in expected:
+        return True
+    
+    # Word overlap - if any significant word matches
+    reported_words = set(reported.replace('-', ' ').replace('/', ' ').split())
+    expected_words = set(expected.replace('-', ' ').replace('/', ' ').split())
+    
+    # Remove common filler words
+    filler = {'the', 'a', 'an', 'and', 'or', 'of', 'in', 'on', 'with', 'from', 'issues', 'problems'}
+    reported_words -= filler
+    expected_words -= filler
+    
+    # If any significant word matches
+    if reported_words & expected_words:
+        return True
+    
+    # Check synonyms
+    for word in reported_words:
+        if word in SYMPTOM_SYNONYMS:
+            for syn in SYMPTOM_SYNONYMS[word]:
+                if syn in expected or expected in syn:
+                    return True
+                if set(syn.split()) & expected_words:
+                    return True
+    
+    # Check if expected has synonyms that match reported
+    for word in expected_words:
+        if word in SYMPTOM_SYNONYMS:
+            for syn in SYMPTOM_SYNONYMS[word]:
+                if syn in reported or reported in syn:
+                    return True
+    
+    return False
+
+
 def calculate_symptom_concordance(video_id: int, diagnosis_id: int,
                                   analyzer_model: Optional[str] = None) -> Dict[str, Any]:
     """
@@ -1016,14 +1237,14 @@ def calculate_symptom_concordance(video_id: int, diagnosis_id: int,
         all_expected = set(expected['all'])
         core_expected = set(expected['core'])
 
-        # Calculate matches
-        reported_set = set(reported_symptoms)
+        # Filter out condition names from reported symptoms
+        # (LLM sometimes extracts the diagnosis itself as a symptom)
+        reported_set = {s for s in set(reported_symptoms) if not _is_condition_name(s)}
 
-        # Fuzzy matching - check if reported symptom contains or is contained by expected
         matched = []
         for reported in reported_set:
             for exp in all_expected:
-                if exp in reported or reported in exp:
+                if _symptom_matches(reported, exp):
                     matched.append(reported)
                     break
 
@@ -1031,7 +1252,7 @@ def calculate_symptom_concordance(video_id: int, diagnosis_id: int,
         core_matched = []
         for m in matched_set:
             for core in core_expected:
-                if core in m or m in core:
+                if _symptom_matches(m, core):
                     core_matched.append(m)
                     break
 
