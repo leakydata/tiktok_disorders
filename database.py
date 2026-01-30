@@ -239,8 +239,27 @@ def init_db():
                 condition_name TEXT NOT NULL,
                 confidence REAL NOT NULL,
                 context TEXT,
-                is_self_diagnosed BOOLEAN,
+                
+                -- Diagnosis status (more nuanced than boolean)
+                diagnosis_status TEXT CHECK (diagnosis_status IN (
+                    'confirmed', 'self_diagnosed', 'suspected', 'clinical', 
+                    'genetic', 'seeking', 'lost', 'unclear'
+                )),
+                is_self_diagnosed BOOLEAN,  -- Keep for backward compatibility
                 diagnosis_date_mentioned TEXT,
+                
+                -- EDS-specific subtype
+                eds_subtype TEXT CHECK (eds_subtype IN (
+                    'hEDS', 'vEDS', 'cEDS', 'clEDS', 'kEDS', 'HSD', NULL
+                )),
+                
+                -- Enhanced fields
+                diagnosing_specialty TEXT,  -- geneticist, rheumatologist, cardiologist, PCP, allergist, self, etc.
+                sentiment TEXT CHECK (sentiment IN (
+                    'validated', 'frustrated', 'relieved', 'questioning', 'neutral', NULL
+                )),
+                mentioned_with TEXT[],  -- Other conditions mentioned in same context
+                
                 extractor_model TEXT,
                 extractor_provider TEXT,
                 extracted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
