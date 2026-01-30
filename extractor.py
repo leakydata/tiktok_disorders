@@ -29,30 +29,274 @@ from database import (
 
 # Symptom categories tuned for EDS / MCAS / POTS discourse (and adjacent mind-body vocabulary)
 SYMPTOM_CATEGORIES = {
-    "musculoskeletal": "Joint pain, hypermobility, dislocations, subluxations, instability, muscle spasms, back/neck pain",
-    "connective_tissue_structural": "Hernias, prolapse, pelvic floor dysfunction, scoliosis, cervical instability, poor wound healing, tissue fragility",
-    "cardiovascular": "Tachycardia, palpitations, chest pain, shortness of breath on exertion, blood pressure swings",
-    "orthostatic_intolerance": "Dizziness, lightheadedness, fainting, presyncope, blood pooling, standing intolerance, shower intolerance",
-    "autonomic": "Temperature dysregulation, sweating issues, tremor, adrenaline surges, exercise intolerance, fatigue after exertion",
-    "gastrointestinal": "Nausea, vomiting, reflux, IBS symptoms, constipation, diarrhea, bloating, gastroparesis, abdominal pain",
-    "mast_cell_allergy_like": "Flushing, hives, itching, swelling, throat tightness, anaphylaxis/anaphylactoid reactions, food/chemical sensitivity, histamine reactions",
-    "dermatological": "Rashes, bruising, stretch marks, fragile skin, abnormal scarring, dermatographia",
-    "respiratory": "Wheezing, asthma-like symptoms, air hunger, throat tightness, breathing difficulty",
-    "neurological": "Headaches, migraines, neuropathy (tingling/numbness/burning), tremor, seizures/syncope discussion, coordination issues",
-    "cognitive": "Brain fog, memory issues, attention problems, word-finding difficulty, confusion",
-    "fatigue": "Chronic fatigue, post-exertional malaise, exhaustion, low stamina, crashes",
-    "sleep": "Insomnia, hypersomnia, unrefreshing sleep, circadian disruption, sleep apnea discussion",
-    "ent_balance": "Vertigo, dizziness (non-orthostatic), tinnitus, ear fullness, sinus issues, globus sensation",
-    "ocular": "Dry eyes, blurry vision, light sensitivity, floaters, eye strain, visual snow discussion",
-    "dental_tmj": "TMJ, jaw pain, dental crowding, gum issues, enamel fragility, teeth grinding",
-    "gynecologic": "Menstrual issues, endometriosis, pelvic pain, hormonal fluctuations, PCOS discussion",
-    "urological": "Interstitial cystitis, bladder pain, urgency, frequency, incontinence, UTIs discussion",
-    "immune_inflammation": "Frequent infections, slow healing, autoimmune talk, inflammation markers discussion",
-    "sensory_overload": "Light/sound sensitivity, overstimulation, sensory intolerance, motion sensitivity",
-    "somatic_functional": "Nervous system dysregulation, fight-or-flight, dissociation/DPDR, somatic symptoms framing, trauma-body connection",
-    "affective": "Anxiety, depression, panic, mood swings, health anxiety discussion",
-    "treatments_devices": "IV fluids, port/PICC, mobility aids, compression garments, salt/electrolytes, beta blockers, antihistamines, mast cell meds, supplements",
-    "other": "Other symptoms not fitting above categories"
+    # === MUSCULOSKELETAL & STRUCTURAL ===
+    "musculoskeletal": (
+        "Joint pain, hypermobility, dislocations, subluxations, instability, muscle spasms, "
+        "back pain, neck pain, 'joints slipping', 'everything pops', loose joints, "
+        "hyperextension, Beighton score, 'bendy', party tricks, joint laxity"
+    ),
+    
+    "craniocervical": (
+        "CCI, AAI, craniocervical instability, atlantoaxial instability, Chiari malformation, "
+        "skull settling, brain stem compression, 'head too heavy', cervical fusion discussion, "
+        "upright MRI, tethered cord, intracranial pressure, CSF flow issues, 'bobblehead feeling'"
+    ),
+    
+    "connective_tissue_structural": (
+        "Hernias, prolapse, pelvic floor dysfunction, scoliosis, flat feet, poor wound healing, "
+        "tissue fragility, stretchy skin, skin hyperextensibility, abnormal scarring, "
+        "organ prolapse, hiatal hernia, 'everything is falling apart'"
+    ),
+    
+    "proprioception_coordination": (
+        "Clumsiness, bumping into things, dropping things, poor spatial awareness, balance issues, "
+        "falling, tripping, 'clumsy since childhood', coordination problems, motor planning issues, "
+        "'can't feel where my body is', bruises from walking into things"
+    ),
+
+    # === CARDIOVASCULAR & AUTONOMIC ===
+    "cardiovascular": (
+        "Tachycardia, palpitations, chest pain, shortness of breath on exertion, blood pressure swings, "
+        "heart racing, 'heart pounding', exercise intolerance, low blood pressure, high heart rate, "
+        "irregular heartbeat, 'can feel my heart', PVCs, chest tightness"
+    ),
+    
+    "orthostatic_intolerance": (
+        "Dizziness, lightheadedness, fainting, presyncope, blood pooling, standing intolerance, "
+        "shower intolerance, 'almost passed out', 'seeing stars', 'graying out', 'legs turn purple', "
+        "'can't stand in line', POTS, orthostatic hypotension, tilt table test, "
+        "'stand up and nearly faint', pooling in legs, mottled legs"
+    ),
+    
+    "autonomic": (
+        "Dysautonomia, autonomic dysfunction, adrenaline surges, 'internal trembling', "
+        "fight-or-flight stuck, hyperadrenergic, 'wired but tired', autonomic storms, "
+        "'body freaking out', nervous system dysregulation, vagus nerve issues"
+    ),
+    
+    "thermoregulation": (
+        "Temperature dysregulation, Raynaud's, cold hands and feet, overheating, heat intolerance, "
+        "cold intolerance, 'can't regulate temperature', sweating issues, night sweats, "
+        "'fingers turn white/blue', poor circulation, 'always freezing', 'overheat easily'"
+    ),
+
+    # === VASCULAR & BLEEDING ===
+    "vascular_bleeding": (
+        "Easy bruising, bleeding gums, heavy periods, nosebleeds, vascular fragility, "
+        "bruise from nothing, 'look like I was beaten', thin skin, visible veins, "
+        "vEDS concerns, vessel rupture discussion, bleeding won't stop, slow clotting"
+    ),
+
+    # === GASTROINTESTINAL ===
+    "gastrointestinal": (
+        "Nausea, vomiting, reflux, GERD, IBS, constipation, diarrhea, bloating, gastroparesis, "
+        "abdominal pain, 'stomach doesn't empty', motility issues, dysmotility, "
+        "'food just sits there', early satiety, SIBO, 'pregnant belly', food intolerances, "
+        "malabsorption, feeding tube discussion, TPN, 'can't keep anything down'"
+    ),
+
+    # === MAST CELL & ALLERGIC ===
+    "mast_cell_allergy_like": (
+        "Flushing, hives, itching, swelling, throat tightness, anaphylaxis, anaphylactoid reactions, "
+        "food sensitivity, chemical sensitivity, histamine reactions, 'reacting to everything', "
+        "'random allergic reactions', 'face on fire', 'itchy from the inside', fragrance sensitivity, "
+        "MCAS, mast cell activation, histamine intolerance, 'allergic to the world', "
+        "dermatographia, pressure hives, medication reactions, 'body attacks itself'"
+    ),
+
+    # === DERMATOLOGICAL ===
+    "dermatological": (
+        "Rashes, bruising, stretch marks, striae, fragile skin, abnormal scarring, "
+        "atrophic scars, 'cigarette paper' scars, skin tearing, slow healing wounds, "
+        "velvety skin, translucent skin, visible veins through skin"
+    ),
+
+    # === RESPIRATORY ===
+    "respiratory": (
+        "Wheezing, asthma-like symptoms, air hunger, throat tightness, breathing difficulty, "
+        "shortness of breath, 'can't get a deep breath', dyspnea, vocal cord dysfunction, "
+        "laryngospasm, 'throat closing', tracheomalacia"
+    ),
+
+    # === NEUROLOGICAL ===
+    "neurological": (
+        "Headaches, migraines, chronic daily headache, neuropathy, tingling, numbness, burning, "
+        "nerve pain, tremor, seizures, non-epileptic seizures, coordination issues, "
+        "'pins and needles', small fiber neuropathy, 'nerves on fire', paresthesias, "
+        "weakness, muscle twitching, fasciculations"
+    ),
+    
+    "cognitive": (
+        "Brain fog, memory issues, attention problems, word-finding difficulty, confusion, "
+        "'can't think straight', 'foggy', 'spaced out', 'losing words', 'stupid brain days', "
+        "cognitive dysfunction, 'thoughts won't connect', processing speed issues, "
+        "'forget mid-sentence', dissociation, depersonalization, derealization, DPDR"
+    ),
+
+    # === FATIGUE & ENERGY ===
+    "fatigue": (
+        "Chronic fatigue, post-exertional malaise, exhaustion, low stamina, crashes, "
+        "'hitting a wall', 'payback', 'wiped out', 'running on empty', PEM, "
+        "'crash after activity', debilitating fatigue, 'fatigue is not just tired', "
+        "'bone-deep exhaustion', unrefreshing rest, 'never feel rested'"
+    ),
+    
+    "flare_patterns": (
+        "Flares, crashes, triggers, baseline vs flare, recovery patterns, 'flare up', "
+        "'in a flare', boom-bust cycle, overdoing it, 'pushed too hard', payback, "
+        "'good days bad days', unpredictable symptoms, symptom cycling, "
+        "'never know how I'll feel', weather triggers, hormonal triggers"
+    ),
+
+    # === SLEEP ===
+    "sleep": (
+        "Insomnia, hypersomnia, unrefreshing sleep, circadian disruption, sleep apnea, "
+        "'sleep but wake up exhausted', delayed sleep phase, 'can't fall asleep', "
+        "'can't stay asleep', vivid dreams, sleep paralysis, restless legs, "
+        "'body won't let me sleep', alpha wave intrusion"
+    ),
+
+    # === EAR NOSE AND THROAT (ENT) & VESTIBULAR ===
+   "vestibular": (
+       "Vertigo, dizziness, non-orthostatic dizziness, 'room spinning', "
+       "vestibular issues, balance problems, motion sensitivity, labyrinthitis"
+   ),
+   
+   "ent": (
+       "Tinnitus, ear fullness, Eustachian tube dysfunction, 'ears ringing', "
+       "chronic sinusitis, sinus issues, post-nasal drip, globus sensation, 'lump in throat'"
+   ),
+
+    # === OCULAR ===
+    "ocular": (
+        "Dry eyes, blurry vision, light sensitivity, photophobia, floaters, eye strain, "
+        "visual snow, 'eyes won't focus', double vision, eye pain, 'sensitive to screens', "
+        "'bright lights hurt', night vision issues, accommodation issues"
+    ),
+
+    # === DENTAL & TMJ ===
+    "dental_tmj": (
+        "TMJ, TMD, jaw pain, jaw clicking, jaw locking, dental crowding, high palate, "
+        "gum issues, enamel fragility, teeth grinding, bruxism, 'jaw dislocates', "
+        "'teeth are crumbling', dental problems despite good hygiene"
+    ),
+
+    # === GYNECOLOGIC & HORMONAL ===
+    "gynecologic": (
+        "Menstrual issues, heavy periods, painful periods, endometriosis, pelvic pain, "
+        "hormonal fluctuations, PCOS, 'symptoms worse around period', menstrual migraines, "
+        "ovarian cysts, adenomyosis, vaginismus, vulvodynia, 'hormones make everything worse', "
+        "perimenopause symptoms, estrogen connection"
+    ),
+
+    # === UROLOGICAL ===
+    "urological": (
+        "Interstitial cystitis, bladder pain, urgency, frequency, incontinence, UTI symptoms, "
+        "recurrent UTIs, 'always have to pee', bladder dysfunction, neurogenic bladder, "
+        "pelvic floor dysfunction, 'can't fully empty bladder'"
+    ),
+
+    # === IMMUNE & INFLAMMATORY ===
+    "immune_inflammation": (
+        "Frequent infections, slow healing, autoimmune discussion, inflammation, "
+        "'always catching something', immunodeficiency, 'body attacking itself', "
+        "elevated inflammatory markers, chronic infections, post-viral syndrome, "
+        "long COVID overlap, reactivated viruses, EBV"
+    ),
+
+    # === SENSORY ===
+    "sensory_overload": (
+        "Light sensitivity, sound sensitivity, overstimulation, sensory intolerance, "
+        "motion sensitivity, 'everything is too loud', 'too much input', sensory processing, "
+        "hyperacusis, misophonia, 'can't handle crowds', 'overwhelmed by stimuli', "
+        "texture sensitivity, smell sensitivity"
+    ),
+
+    # === PAIN CHARACTERIZATION ===
+    "pain_characterization": (
+        "Widespread pain, chronic pain, fibromyalgia-like pain, allodynia, hyperalgesia, "
+        "'pain everywhere', 'hurts to be touched', central sensitization, "
+        "'pain out of proportion', burning pain, stabbing pain, deep aching, "
+        "'pain moves around', 'whole body hurts', pain amplification"
+    ),
+
+    # === METABOLIC ===
+    "metabolic": (
+        "Reactive hypoglycemia, blood sugar crashes, 'shaky if I don't eat', "
+        "electrolyte imbalance, 'need salt', dehydration despite drinking water, "
+        "'can't absorb nutrients', vitamin deficiencies, 'blood sugar roller coaster', "
+        "adrenal issues, thyroid discussion, metabolic dysfunction"
+    ),
+
+    # === MEDICATION REACTIONS ===
+    "medication_reactions": (
+        "Paradoxical reactions, anesthesia resistance, anesthesia failure, medication sensitivities, "
+        "'meds don't work on me', 'opposite reaction', lidocaine resistance, 'need more anesthesia', "
+        "'allergic to everything', 'can't tolerate medications', side effects from everything, "
+        "'sensitive to all meds', pharmacogenomics, drug metabolism issues"
+    ),
+
+    # === MENTAL HEALTH & SOMATIC ===
+    "affective": (
+        "Anxiety, depression, panic attacks, mood swings, health anxiety, medical trauma, "
+        "'anxiety from symptoms', 'depressed about health', PTSD from medical experiences, "
+        "grief over health, 'mourning old life', emotional dysregulation, "
+        "'doctors said it was anxiety', mental health impact of chronic illness"
+    ),
+    
+    "somatic_functional": (
+        "Nervous system dysregulation, fight-or-flight stuck, somatic symptoms, "
+        "trauma-body connection, 'stored in the body', functional neurological, "
+        "conversion discussion, mind-body, polyvagal, nervous system healing, "
+        "'brain-body disconnect', somatic experiencing, trauma-informed"
+    ),
+
+    # === COMORBIDITY & CONNECTIONS ===
+    "comorbidity_connections": (
+        "Trifecta, 'EDS POTS MCAS', syndrome clustering, fibromyalgia overlap, ME/CFS, "
+        "chronic fatigue syndrome, autoimmune connection, 'one diagnosis led to another', "
+        "'collect diagnoses', comorbid conditions, 'they all connect', "
+        "hypermobility spectrum, connective tissue disorder umbrella"
+    ),
+
+    # === DIAGNOSTIC EXPERIENCE ===
+    "diagnostic_journey": (
+        "Medical gaslighting, dismissed by doctors, 'it's just anxiety', 'it's in your head', "
+        "years to diagnosis, misdiagnosis, invalidation, 'doctor didn't believe me', "
+        "fighting for diagnosis, self-advocacy, 'had to diagnose myself', specialist waitlists, "
+        "'finally got answers', diagnostic odyssey, 'no one could figure it out', "
+        "vindication, validation, 'I knew something was wrong'"
+    ),
+
+    # === FUNCTIONAL CAPACITY & DISABILITY ===
+    "functional_capacity": (
+        "Disability, can't work, had to quit job, dropped out of school, mobility aids, "
+        "wheelchair user, cane, walker, 'good days bad days', pacing, energy envelope, "
+        "'pushing through', activity limitations, 'used to be able to', grieving abilities, "
+        "'invisible illness', 'but you don't look sick', disabled identity, "
+        "housebound, bedbound, 'life got smaller'"
+    ),
+
+    # === TREATMENTS & DEVICES ===
+    "treatments_devices": (
+        "IV fluids, port, PICC line, central line, mobility aids, wheelchair, cane, walker, "
+        "compression garments, compression socks, salt tablets, electrolytes, Liquid IV, "
+        "beta blockers, midodrine, fludrocortisone, antihistamines, H1 H2 blockers, "
+        "mast cell stabilizers, cromolyn, ketotifen, low-dose naltrexone, LDN, "
+        "supplements, vitamins, physical therapy, occupational therapy, "
+        "bracing, splints, KT tape, ring splints, cervical collar"
+    ),
+
+    # === COMMUNITY & IDENTITY ===
+    "community_identity": (
+        "Spoonie, zebra, chronic illness community, disability identity, 'my body', "
+        "'chronic illness life', EDS awareness, rare disease, 'zebra strong', "
+        "support groups, online community, 'people who get it', chronic illness creator, "
+        "advocacy, awareness month, 'not alone'"
+    ),
+
+    # === OTHER ===
+    "other": "Other symptoms or topics not fitting above categories"
 }
 
 
