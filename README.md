@@ -275,6 +275,9 @@ uv run python pipeline.py extract --all --max-song-ratio 0.3 --min-words 30
 | `--min-confidence` | 0.6 | Minimum confidence for symptoms |
 | `--provider` | ollama | LLM provider (ollama or anthropic) |
 | `--model` | gpt-oss:20b | LLM model name |
+| `--force` | - | Re-extract all videos (clears previous extraction status) |
+
+**Note:** Videos are marked as "extracted" after processing (even if zero symptoms found). This prevents re-processing the same videos. Use `--force` to re-extract.
 
 ### Analysis and Statistics
 
@@ -563,19 +566,21 @@ The pipeline is designed to be safe to re-run without creating duplicates:
 |-------|----------|
 | Download | Skips if audio file already exists |
 | Transcribe | Skips if transcript already exists |
-| Extract | Skips if symptoms already extracted |
+| Extract | Skips if `extracted_at` timestamp is set (use `--force` to re-extract) |
 | Extract | Skips if song_lyrics_ratio >= 0.2 (configurable via --max-song-ratio) |
+| Extract | Skips if word_count < 20 (configurable via --min-words) |
 
 This means you can:
 - Restart an interrupted pipeline safely
 - Add new URLs to `urls.txt` and re-run (only new videos processed)
 - Re-run after fixing errors without worrying about duplicates
+- Use `--force` to re-extract all videos if needed
 
 ## Database Schema
 
 ### Core Tables
 - `videos` - Video metadata, engagement metrics, author info, creator tier
-- `transcripts` - Transcribed text with model provenance, song lyrics ratio
+- `transcripts` - Transcribed text with model provenance, song lyrics ratio, extraction timestamp
 - `symptoms` - Extracted symptoms with severity, temporal patterns
 - `claimed_diagnoses` - Conditions the speaker claims to have
 - `treatments` - Medications, supplements, therapies mentioned

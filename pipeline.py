@@ -476,7 +476,7 @@ def cmd_transcribe(args):
 
 def cmd_extract(args):
     """Handle the 'extract' subcommand - extract symptoms only."""
-    from database import get_connection
+    from database import get_connection, clear_transcript_extracted
 
     extractor = SymptomExtractor(
         max_workers=10 if not args.no_parallel else 1,
@@ -486,35 +486,72 @@ def cmd_extract(args):
     )
 
     min_words = getattr(args, 'min_words', 20)
+    force = getattr(args, 'force', False)
     
     if args.video_id:
         video_ids = [args.video_id]
+        if force:
+            clear_transcript_extracted(args.video_id)
+            print(f"Force mode: cleared extraction status for video {args.video_id}")
     elif args.all:
-        # Find videos with transcripts that haven't been extracted yet
-        # Excludes: already extracted, song lyrics, and short transcripts
+        # Find videos with transcripts to extract
+        # If --force, include already extracted; otherwise only unextracted
         with get_connection() as conn:
             cur = conn.cursor()
-            cur.execute("""
-                SELECT DISTINCT t.video_id
-                FROM transcripts t
-                WHERE t.extracted_at IS NULL
-                  AND (t.song_lyrics_ratio IS NULL OR t.song_lyrics_ratio < %s)
-                  AND (t.word_count IS NULL OR t.word_count >= %s)
-            """, (args.max_song_ratio, min_words))
-            video_ids = [row[0] for row in cur.fetchall()]
             
-            # Count how many were skipped for each reason
-            cur.execute("""
-                SELECT 
-                    COUNT(*) FILTER (WHERE t.extracted_at IS NOT NULL) as already_extracted,
-                    COUNT(*) FILTER (WHERE t.extracted_at IS NULL AND t.song_lyrics_ratio >= %s) as skipped_lyrics,
-                    COUNT(*) FILTER (WHERE t.extracted_at IS NULL AND t.word_count < %s) as skipped_short
-                FROM transcripts t
-            """, (args.max_song_ratio, min_words))
-            row = cur.fetchone()
-            already_extracted = row[0]
-            skipped_lyrics = row[1]
-            skipped_short = row[2]
+            if force:
+                # Force mode: include all transcripts (ignore extracted_at)
+                cur.execute("""
+                    SELECT DISTINCT t.video_id
+                    FROM transcripts t
+                    WHERE (t.song_lyrics_ratio IS NULL OR t.song_lyrics_ratio < %s)
+                      AND (t.word_count IS NULL OR t.word_count >= %s)
+                """, (args.max_song_ratio, min_words))
+                video_ids = [row[0] for row in cur.fetchall()]
+                
+                # Count skipped
+                cur.execute("""
+                    SELECT 
+                        COUNT(*) FILTER (WHERE t.song_lyrics_ratio >= %s) as skipped_lyrics,
+                        COUNT(*) FILTER (WHERE t.word_count < %s) as skipped_short
+                    FROM transcripts t
+                """, (args.max_song_ratio, min_words))
+                row = cur.fetchone()
+                skipped_lyrics = row[0]
+                skipped_short = row[1]
+                already_extracted = 0
+                
+                # Clear extraction status for all selected videos
+                if video_ids:
+                    cur.execute("""
+                        UPDATE transcripts SET extracted_at = NULL
+                        WHERE video_id = ANY(%s)
+                    """, (video_ids,))
+                    conn.commit()
+                    print(f"Force mode: cleared extraction status for {len(video_ids)} videos")
+            else:
+                # Normal mode: exclude already extracted
+                cur.execute("""
+                    SELECT DISTINCT t.video_id
+                    FROM transcripts t
+                    WHERE t.extracted_at IS NULL
+                      AND (t.song_lyrics_ratio IS NULL OR t.song_lyrics_ratio < %s)
+                      AND (t.word_count IS NULL OR t.word_count >= %s)
+                """, (args.max_song_ratio, min_words))
+                video_ids = [row[0] for row in cur.fetchall()]
+                
+                # Count how many were skipped for each reason
+                cur.execute("""
+                    SELECT 
+                        COUNT(*) FILTER (WHERE t.extracted_at IS NOT NULL) as already_extracted,
+                        COUNT(*) FILTER (WHERE t.extracted_at IS NULL AND t.song_lyrics_ratio >= %s) as skipped_lyrics,
+                        COUNT(*) FILTER (WHERE t.extracted_at IS NULL AND t.word_count < %s) as skipped_short
+                    FROM transcripts t
+                """, (args.max_song_ratio, min_words))
+                row = cur.fetchone()
+                already_extracted = row[0]
+                skipped_lyrics = row[1]
+                skipped_short = row[2]
 
         if not video_ids:
             print("All transcripts already processed!")
@@ -534,7 +571,7 @@ def cmd_extract(args):
     for i, vid in enumerate(video_ids, 1):
         print(f"\n[{i}/{len(video_ids)}] Extracting from video ID {vid}...")
         try:
-            result = extractor.extract_all(vid)
+            result = extractor.extract_all(vid, force=force)
             if result.get('success'):
                 symptoms = result.get('symptoms', {}).get('symptoms_saved', 0)
                 diagnoses = result.get('diagnoses', {}).get('diagnoses_saved', 0)
