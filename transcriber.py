@@ -442,10 +442,92 @@ def _apply_transcription_corrections(text: str) -> str:
     corrected = text
     for wrong, right in TRANSCRIPTION_CORRECTIONS.items():
         # Case-insensitive replacement while preserving surrounding context
-        import re
         pattern = re.compile(re.escape(wrong), re.IGNORECASE)
         corrected = pattern.sub(right, corrected)
     return corrected
+
+
+def _remove_repeated_phrases(text: str, min_phrase_words: int = 4, max_repeats: int = 2) -> str:
+    """
+    Remove repeated consecutive phrases/sentences from transcription.
+    
+    Whisper sometimes gets stuck in loops and repeats the same phrase many times.
+    This function detects and collapses these repetitions.
+    
+    Args:
+        text: The transcribed text
+        min_phrase_words: Minimum words in a phrase to consider for deduplication
+        max_repeats: Maximum times a phrase should appear consecutively
+    
+    Returns:
+        Cleaned text with repetitions removed
+    """
+    if not text or len(text) < 50:
+        return text
+    
+    # Split into sentences (by period, question mark, exclamation)
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    
+    if len(sentences) < 3:
+        return text
+    
+    # Remove consecutive duplicate sentences
+    cleaned_sentences = []
+    prev_sentence = None
+    repeat_count = 0
+    
+    for sentence in sentences:
+        # Normalize for comparison (lowercase, strip extra whitespace)
+        normalized = ' '.join(sentence.lower().split())
+        
+        if normalized == prev_sentence:
+            repeat_count += 1
+            if repeat_count < max_repeats:
+                cleaned_sentences.append(sentence)
+        else:
+            cleaned_sentences.append(sentence)
+            prev_sentence = normalized
+            repeat_count = 0
+    
+    result = ' '.join(cleaned_sentences)
+    
+    # Also detect repeated phrases within sentences
+    # Look for patterns like "phrase phrase phrase phrase"
+    words = result.split()
+    if len(words) < min_phrase_words * 3:
+        return result
+    
+    # Try different phrase lengths (4-10 words)
+    for phrase_len in range(min_phrase_words, min(11, len(words) // 3)):
+        i = 0
+        new_words = []
+        while i < len(words):
+            phrase = ' '.join(words[i:i + phrase_len])
+            
+            # Count how many times this phrase repeats consecutively
+            repeats = 1
+            j = i + phrase_len
+            while j + phrase_len <= len(words):
+                next_phrase = ' '.join(words[j:j + phrase_len])
+                if next_phrase.lower() == phrase.lower():
+                    repeats += 1
+                    j += phrase_len
+                else:
+                    break
+            
+            # If repeated more than max_repeats, collapse
+            if repeats > max_repeats:
+                # Keep only max_repeats instances
+                for _ in range(max_repeats):
+                    new_words.extend(words[i:i + phrase_len])
+                i = j  # Skip all the repetitions
+            else:
+                new_words.append(words[i])
+                i += 1
+        
+        words = new_words
+    
+    return ' '.join(words)
 
 
 def _get_author_dir(author: str) -> Path:
@@ -579,6 +661,7 @@ class AudioTranscriber:
             for segment in segments_iter:
                 # Apply corrections to each segment
                 corrected_text = _apply_transcription_corrections(segment.text)
+                corrected_text = _remove_repeated_phrases(corrected_text)
                 text_parts.append(corrected_text)
                 if save_segments:
                     segment_items.append({
@@ -588,6 +671,8 @@ class AudioTranscriber:
                     })
 
             text = " ".join(text_parts).strip()
+            # Apply deduplication to full text (repetitions may span segments)
+            text = _remove_repeated_phrases(text)
             detected_language = info.language if info and info.language else (language or 'unknown')
             segments = segment_items if save_segments else None
         else:
@@ -613,6 +698,7 @@ class AudioTranscriber:
 
             # Extract results and apply corrections
             text = _apply_transcription_corrections(result['text'].strip())
+            text = _remove_repeated_phrases(text)
             detected_language = result['language']
             
             # Apply corrections to segments too
@@ -622,6 +708,7 @@ class AudioTranscriber:
                 for seg in result['segments']:
                     seg_copy = dict(seg)
                     seg_copy['text'] = _apply_transcription_corrections(seg['text'])
+                    seg_copy['text'] = _remove_repeated_phrases(seg_copy['text'])
                     segments.append(seg_copy)
 
         # Save to file in author subdirectory

@@ -186,6 +186,7 @@ def init_db():
                 id SERIAL PRIMARY KEY,
                 video_id INTEGER REFERENCES videos(id) ON DELETE CASCADE,
                 text TEXT NOT NULL,
+                original_text TEXT DEFAULT NULL,  -- Stores original if cleaned (for revert)
                 language TEXT,
                 language_confidence REAL,
                 model_used TEXT,
@@ -193,6 +194,7 @@ def init_db():
                 model_compute_type TEXT,
                 transcription_device TEXT,
                 word_count INTEGER,
+                original_word_count INTEGER DEFAULT NULL,  -- Original word count if cleaned
                 audio_duration_seconds REAL,
                 words_per_minute REAL,
                 segments JSONB,
@@ -200,10 +202,16 @@ def init_db():
                 processing_time_seconds REAL,
                 song_lyrics_ratio REAL DEFAULT NULL,
                 extracted_at TIMESTAMP DEFAULT NULL,
+                cleaned_at TIMESTAMP DEFAULT NULL,  -- When repetitions were removed
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE(video_id)
             )
         """)
+        
+        # Add columns for existing databases
+        cur.execute("ALTER TABLE transcripts ADD COLUMN IF NOT EXISTS original_text TEXT DEFAULT NULL")
+        cur.execute("ALTER TABLE transcripts ADD COLUMN IF NOT EXISTS original_word_count INTEGER DEFAULT NULL")
+        cur.execute("ALTER TABLE transcripts ADD COLUMN IF NOT EXISTS cleaned_at TIMESTAMP DEFAULT NULL")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_transcripts_extracted_at ON transcripts(extracted_at)")
 
         # Symptoms table

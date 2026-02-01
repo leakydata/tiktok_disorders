@@ -521,6 +521,43 @@ uv run python scripts/retranscribe.py --video-ids 217 239 --backup --provider ol
 
 This ensures dataset consistency for publication.
 
+### Clean Repeated Phrases
+
+Whisper sometimes "hallucinates" and repeats the same phrase many times. The cleaning script detects and removes these repetitions while preserving the original text for revert.
+
+```bash
+# Preview what would be cleaned (dry run with full text)
+uv run python scripts/clean_transcripts.py --dry-run --verbose
+
+# Only clean transcripts with >10% reduction
+uv run python scripts/clean_transcripts.py --min-reduction 10
+
+# Clean all transcripts (originals preserved automatically)
+uv run python scripts/clean_transcripts.py
+
+# Show cleaning statistics
+uv run python scripts/clean_transcripts.py --stats
+
+# Revert all cleaned transcripts back to original
+uv run python scripts/clean_transcripts.py --revert
+```
+
+| Option | Description |
+|--------|-------------|
+| `--dry-run` | Preview without modifying database |
+| `--verbose` | Show full original and cleaned text |
+| `--min-reduction N` | Only clean if reduction >= N% |
+| `--limit N` | Process only first N transcripts |
+| `--revert` | Restore original text from backup |
+| `--stats` | Show cleaning statistics |
+
+The script automatically:
+- Preserves original in `original_text` column
+- Updates `word_count` with cleaned count
+- Records `cleaned_at` timestamp
+
+New transcriptions automatically have repetitions removed during transcription.
+
 ### Treatment Normalization
 
 The extractor automatically normalizes LLM responses to valid database values:

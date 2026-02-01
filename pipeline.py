@@ -463,11 +463,11 @@ def cmd_transcribe(args):
         with get_connection() as conn:
             cur = conn.cursor()
             cur.execute("""
-                SELECT v.id, v.uploader FROM videos v
+                SELECT v.id, v.author FROM videos v
                 LEFT JOIN transcripts t ON v.id = t.video_id
                 WHERE t.id IS NULL 
                   AND v.audio_path IS NOT NULL
-                  AND v.uploader = ANY(%s)
+                  AND v.author = ANY(%s)
             """, (args.user,))
             results = cur.fetchall()
             video_ids = [row[0] for row in results]
@@ -542,7 +542,7 @@ def cmd_extract(args):
                 SELECT DISTINCT t.video_id
                 FROM transcripts t
                 JOIN videos v ON t.video_id = v.id
-                WHERE v.uploader = ANY(%s)
+                WHERE v.author = ANY(%s)
                   AND (t.extracted_at IS NULL OR %s)
                   AND (t.song_lyrics_ratio IS NULL OR t.song_lyrics_ratio < %s)
                   AND (t.word_count IS NULL OR t.word_count >= %s)
