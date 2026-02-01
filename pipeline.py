@@ -405,7 +405,7 @@ def cmd_run(args):
 
 def cmd_download(args):
     """Handle the 'download' subcommand - download only."""
-    from scripts.discover import get_user_videos
+    from scripts.discover import discover_user_videos
     
     downloader = VideoDownloader()
     urls = []
@@ -419,7 +419,7 @@ def cmd_download(args):
         print(f"Discovering videos for user(s): {', '.join(args.user)}")
         for username in args.user:
             try:
-                user_urls = get_user_videos(username, max_videos=getattr(args, 'max_videos', None))
+                user_urls = discover_user_videos(username, max_videos=getattr(args, 'max_videos', None))
                 print(f"  Found {len(user_urls)} videos for @{username}")
                 urls.extend(user_urls)
             except Exception as e:
