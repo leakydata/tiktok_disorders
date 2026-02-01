@@ -441,6 +441,25 @@ def cmd_transcribe(args):
 
     if args.video_id:
         video_ids = [args.video_id]
+    elif getattr(args, 'user', None):
+        # Find untranscribed videos for specific user(s)
+        with get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT v.id, v.uploader FROM videos v
+                LEFT JOIN transcripts t ON v.id = t.video_id
+                WHERE t.id IS NULL 
+                  AND v.audio_path IS NOT NULL
+                  AND v.uploader = ANY(%s)
+            """, (args.user,))
+            results = cur.fetchall()
+            video_ids = [row[0] for row in results]
+            
+        if not video_ids:
+            print(f"No untranscribed videos found for user(s): {', '.join(args.user)}")
+            return 0
+        
+        print(f"Found {len(video_ids)} untranscribed video(s) for user(s): {', '.join(args.user)}")
     elif args.all:
         # Find videos without transcripts
         with get_connection() as conn:
@@ -458,7 +477,7 @@ def cmd_transcribe(args):
 
         print(f"Found {len(video_ids)} video(s) to transcribe")
     else:
-        print("Error: Provide --video-id or --all")
+        print("Error: Provide --video-id, --user, or --all")
         return 1
 
     success_count = 0
@@ -498,6 +517,34 @@ def cmd_extract(args):
         if force:
             clear_transcript_extracted(args.video_id)
             print(f"Force mode: cleared extraction status for video {args.video_id}")
+    elif getattr(args, 'user', None):
+        # Find transcripts for specific user(s)
+        with get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT DISTINCT t.video_id
+                FROM transcripts t
+                JOIN videos v ON t.video_id = v.id
+                WHERE v.uploader = ANY(%s)
+                  AND (t.extracted_at IS NULL OR %s)
+                  AND (t.song_lyrics_ratio IS NULL OR t.song_lyrics_ratio < %s)
+                  AND (t.word_count IS NULL OR t.word_count >= %s)
+            """, (args.user, force, args.max_song_ratio, min_words))
+            video_ids = [row[0] for row in cur.fetchall()]
+            
+            if force and video_ids:
+                cur.execute("""
+                    UPDATE transcripts SET extracted_at = NULL
+                    WHERE video_id = ANY(%s)
+                """, (video_ids,))
+                conn.commit()
+                print(f"Force mode: cleared extraction status for {len(video_ids)} videos")
+        
+        if not video_ids:
+            print(f"No videos to extract for user(s): {', '.join(args.user)}")
+            return 0
+        
+        print(f"Found {len(video_ids)} video(s) to extract for user(s): {', '.join(args.user)}")
     elif args.all:
         # Find videos with transcripts to extract
         # If --force, include already extracted; otherwise only unextracted
@@ -568,7 +615,7 @@ def cmd_extract(args):
         if already_extracted > 0 or skipped_lyrics > 0 or skipped_short > 0:
             print(f"  ({already_extracted} already extracted, {skipped_lyrics} song lyrics, {skipped_short} too short < {min_words} words)")
     else:
-        print("Error: Provide --video-id or --all")
+        print("Error: Provide --video-id, --user, or --all")
         return 1
 
     total_symptoms = 0
@@ -825,6 +872,7 @@ Examples:
     tr_parser = subparsers.add_parser('transcribe', help='Transcribe audio only')
     tr_parser.add_argument('--video-id', type=int, help='Single video database ID')
     tr_parser.add_argument('--all', action='store_true', help='Transcribe all untranscribed videos')
+    tr_parser.add_argument('--user', action='append', help='TikTok username(s) to transcribe')
     tr_parser.add_argument('--whisper-model', default='large-v3', help='Whisper model size')
     tr_parser.set_defaults(func=cmd_transcribe)
 
@@ -832,7 +880,8 @@ Examples:
     ex_parser = subparsers.add_parser('extract', help='Extract symptoms only')
     ex_parser.add_argument('--video-id', type=int, help='Single video database ID')
     ex_parser.add_argument('--all', action='store_true', help='Extract from all unprocessed transcripts')
-    ex_parser.add_argument('--provider', help='Extractor provider (anthropic or ollama)')
+    ex_parser.add_argument('--user', action='append', help='TikTok username(s) to extract from')
+    ex_parser.add_argument('--provider', help='Extractor provider (ollama, deepseek, or anthropic)')
     ex_parser.add_argument('--model', help='Extractor model name')
     ex_parser.add_argument('--min-confidence', type=float, default=0.6, help='Min symptom confidence')
     ex_parser.add_argument('--no-parallel', action='store_true', help='Disable parallel extraction')
