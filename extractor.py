@@ -13,11 +13,15 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from config import (
     ANTHROPIC_API_KEY,
     ANTHROPIC_MODEL,
+    DEEPSEEK_API_KEY,
+    DEEPSEEK_MODEL,
+    DEEPSEEK_URL,
     EXTRACTOR_PROVIDER,
     MIN_CONFIDENCE_SCORE,
     OLLAMA_MODEL,
     OLLAMA_URL,
 )
+from openai import OpenAI
 from database import (
     insert_symptom, get_transcript, get_video_by_id,
     insert_claimed_diagnosis, get_diagnoses_by_video,
@@ -26,6 +30,71 @@ from database import (
     get_symptoms_by_video, update_transcript_song_lyrics_ratio,
     mark_transcript_extracted
 )
+import re
+
+
+def _clean_json_response(text: str) -> str:
+    """Clean LLM response to extract valid JSON."""
+    # Remove markdown code blocks
+    if '```json' in text:
+        text = text.split('```json')[1].split('```')[0].strip()
+    elif '```' in text:
+        text = text.split('```')[1].split('```')[0].strip()
+    
+    # Remove any leading/trailing whitespace and newlines
+    text = text.strip()
+    
+    # Fix common JSON issues from LLMs
+    # 1. Trailing commas before closing brackets
+    text = re.sub(r',\s*}', '}', text)
+    text = re.sub(r',\s*]', ']', text)
+    
+    # 2. Single quotes instead of double quotes (but be careful with apostrophes)
+    # Only replace single quotes that look like JSON delimiters
+    
+    # 3. Unescaped newlines in strings - replace with space
+    # This is tricky, so skip for now
+    
+    # 4. Control characters
+    text = re.sub(r'[\x00-\x1f\x7f-\x9f]', ' ', text)
+    
+    return text
+
+
+def _parse_json_safely(text: str, default: Any = None) -> Any:
+    """Parse JSON with cleaning and fallback."""
+    try:
+        cleaned = _clean_json_response(text)
+        return json.loads(cleaned)
+    except json.JSONDecodeError as e:
+        # Try to extract just the JSON part if there's extra text
+        # Look for first { or [ and last } or ]
+        start_brace = text.find('{')
+        start_bracket = text.find('[')
+        
+        if start_brace >= 0 and (start_bracket < 0 or start_brace < start_bracket):
+            # Object
+            end = text.rfind('}')
+            if end > start_brace:
+                try:
+                    cleaned = _clean_json_response(text[start_brace:end+1])
+                    return json.loads(cleaned)
+                except:
+                    pass
+        elif start_bracket >= 0:
+            # Array
+            end = text.rfind(']')
+            if end > start_bracket:
+                try:
+                    cleaned = _clean_json_response(text[start_bracket:end+1])
+                    return json.loads(cleaned)
+                except:
+                    pass
+        
+        # If all else fails, raise the original error
+        if default is not None:
+            return default
+        raise e
 
 
 # Symptom categories tuned for EDS / MCAS / POTS discourse (and adjacent mind-body vocabulary)
@@ -330,46 +399,67 @@ class SymptomExtractor:
         Initialize the symptom extractor.
 
         Args:
-            api_key: Anthropic API key (defaults to config.ANTHROPIC_API_KEY)
+            api_key: API key (Anthropic or DeepSeek depending on provider)
             max_workers: Maximum parallel API calls (default 20 for workstation)
             use_combined_extraction: Use single prompt for all extractions (faster)
             max_song_ratio: Skip videos with song_lyrics_ratio >= this (default 0.2)
-            enable_thinking: For Qwen3 models, use /think mode (slower, more thorough)
+            enable_thinking: For Qwen3/DeepSeek-R1 models, use thinking mode (slower, more thorough)
         """
         self.provider = (provider or EXTRACTOR_PROVIDER).lower()
         self.max_song_ratio = max_song_ratio
         self.enable_thinking = enable_thinking
-        if self.provider not in {"anthropic", "ollama"}:
-            raise ValueError("provider must be 'anthropic' or 'ollama'")
+        if self.provider not in {"anthropic", "ollama", "deepseek"}:
+            raise ValueError("provider must be 'anthropic', 'ollama', or 'deepseek'")
 
-        self.api_key = api_key or ANTHROPIC_API_KEY
-        self.model = model or (ANTHROPIC_MODEL if self.provider == "anthropic" else OLLAMA_MODEL)
-        self.ollama_url = (ollama_url or OLLAMA_URL).rstrip("/")
-        self.use_combined_extraction = use_combined_extraction
-
+        # Set up model and API key based on provider
         if self.provider == "anthropic":
+            self.api_key = api_key or ANTHROPIC_API_KEY
+            self.model = model or ANTHROPIC_MODEL
             if not self.api_key:
                 raise ValueError("ANTHROPIC_API_KEY is required for Anthropic")
             self.client = anthropic.Anthropic(api_key=self.api_key)
-        else:
+        elif self.provider == "deepseek":
+            self.api_key = api_key or DEEPSEEK_API_KEY
+            self.model = model or DEEPSEEK_MODEL
+            if not self.api_key:
+                raise ValueError("DEEPSEEK_API_KEY is required for DeepSeek")
+            self.client = OpenAI(
+                api_key=self.api_key,
+                base_url=DEEPSEEK_URL
+            )
+        else:  # ollama
+            self.api_key = None
+            self.model = model or OLLAMA_MODEL
             self.client = None
+        
+        self.ollama_url = (ollama_url or OLLAMA_URL).rstrip("/")
+        self.use_combined_extraction = use_combined_extraction
         self.max_workers = max_workers
         
         # Detect model capabilities
         model_lower = self.model.lower()
         self.is_qwen3 = 'qwen3' in model_lower or 'qwen-3' in model_lower
         self.is_medgemma = 'medgemma' in model_lower
+        self.is_deepseek = 'deepseek' in model_lower or self.provider == 'deepseek'
+        self.is_deepseek_reasoner = 'reasoner' in model_lower or 'r1' in model_lower
         
         # High-capability models get longer timeouts and combined extraction
-        # Be inclusive - most modern models >7B are capable
-        self.is_high_capability = any(x in model_lower for x in [
+        # All API providers (anthropic, deepseek) are high-capability
+        self.is_high_capability = self.provider in {'anthropic', 'deepseek'} or any(x in model_lower for x in [
             'gpt-oss', 'qwen', 'llama3', 'llama-3', 'mixtral', 'medgemma',
             'gemma', 'phi', 'glm', 'deepseek', 'yi', 'mistral', 'command-r',
             'claude', 'gpt-4', 'wizard', 'solar', 'nous', 'dolphin',
             ':20b', ':27b', ':32b', ':34b', ':70b', ':72b', ':120b',  # Size-based detection
         ])
         
-        if self.is_qwen3:
+        if self.is_deepseek:
+            if self.is_deepseek_reasoner:
+                print(f"[OK] DeepSeek Reasoner detected: {self.model}")
+                print(f"    Deep reasoning model with chain-of-thought")
+            else:
+                print(f"[OK] DeepSeek model detected: {self.model}")
+            print(f"    Cost-effective API with strong reasoning capabilities")
+        elif self.is_qwen3:
             thinking_mode = "/think (deep reasoning)" if enable_thinking else "/no_think (fast extraction)"
             print(f"[OK] Qwen3 model detected: {self.model}")
             print(f"    Mode: {thinking_mode}")
@@ -377,6 +467,8 @@ class SymptomExtractor:
         elif self.is_medgemma:
             print(f"[OK] MedGemma model detected: {self.model}")
             print(f"    Medical terminology deeply embedded from training")
+        elif self.provider == 'anthropic':
+            print(f"[OK] Anthropic Claude model: {self.model}")
         elif self.is_high_capability:
             print(f"[OK] High-capability model detected: {self.model}")
         else:
@@ -477,10 +569,7 @@ Return ONLY the JSON array, no additional text."""
             # Extract JSON from response (in case there's extra text)
             if '```json' in response_text:
                 response_text = response_text.split('```json')[1].split('```')[0].strip()
-            elif '```' in response_text:
-                response_text = response_text.split('```')[1].split('```')[0].strip()
-
-            symptoms = json.loads(response_text)
+            symptoms = _parse_json_safely(response_text, default=[])
 
             # Validate and save symptoms with enhanced fields
             saved_count = 0
@@ -652,12 +741,7 @@ TRANSCRIPT:
             response_text = self._call_model(prompt)
 
             # Extract JSON
-            if '```json' in response_text:
-                response_text = response_text.split('```json')[1].split('```')[0].strip()
-            elif '```' in response_text:
-                response_text = response_text.split('```')[1].split('```')[0].strip()
-
-            diagnoses = json.loads(response_text)
+            diagnoses = _parse_json_safely(response_text, default=[])
 
             # Save diagnoses
             saved_count = 0
@@ -775,12 +859,7 @@ TRANSCRIPT:
             response_text = self._call_model(prompt)
 
             # Extract JSON
-            if '```json' in response_text:
-                response_text = response_text.split('```json')[1].split('```')[0].strip()
-            elif '```' in response_text:
-                response_text = response_text.split('```')[1].split('```')[0].strip()
-
-            treatments = json.loads(response_text)
+            treatments = _parse_json_safely(response_text, default=[])
 
             # Save treatments
             saved_count = 0
@@ -904,12 +983,7 @@ Return ONLY the JSON object, no additional text."""
             response_text = self._call_model(prompt)
 
             # Extract JSON
-            if '```json' in response_text:
-                response_text = response_text.split('```json')[1].split('```')[0].strip()
-            elif '```' in response_text:
-                response_text = response_text.split('```')[1].split('```')[0].strip()
-
-            elements = json.loads(response_text)
+            elements = _parse_json_safely(response_text, default={})
 
             # Add metadata
             elements['extractor_model'] = self.model
@@ -1095,12 +1169,7 @@ Return ONLY the JSON object, no additional text."""
             response_text = self._call_model(prompt)
 
             # Extract JSON
-            if '```json' in response_text:
-                response_text = response_text.split('```json')[1].split('```')[0].strip()
-            elif '```' in response_text:
-                response_text = response_text.split('```')[1].split('```')[0].strip()
-
-            data = json.loads(response_text)
+            data = _parse_json_safely(response_text)
 
             # Check if LLM detected song lyrics during extraction
             if data.get('is_song_lyrics') is True:
@@ -1349,8 +1418,21 @@ Return ONLY the JSON object, no additional text."""
                 }]
             )
             return response.content[0].text.strip()
+        
+        if self.provider == "deepseek":
+            # DeepSeek uses OpenAI-compatible API
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[{
+                    "role": "user",
+                    "content": prompt
+                }],
+                max_tokens=8192,
+                temperature=0.0,
+            )
+            return response.choices[0].message.content.strip()
 
-        # For Qwen3 models, prepend thinking mode control
+        # For Qwen3 models (Ollama), prepend thinking mode control
         final_prompt = prompt
         if self.is_qwen3:
             if force_thinking or self.enable_thinking:

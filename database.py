@@ -875,6 +875,155 @@ def get_song_lyrics_stats() -> Dict[str, Any]:
 
 
 # =============================================================================
+# Value Normalization (LLM outputs -> valid database values)
+# =============================================================================
+
+# Temporal pattern normalization
+TEMPORAL_PATTERN_MAP = {
+    'acute': 'acute',
+    'acute (transient)': 'acute',
+    'transient': 'acute',
+    'sudden': 'acute',
+    'chronic': 'chronic',
+    'long-term': 'chronic',
+    'persistent': 'chronic',
+    'ongoing': 'chronic',
+    'constant': 'chronic',
+    'intermittent': 'intermittent',
+    'episodic': 'intermittent',
+    'fluctuating': 'intermittent',
+    'comes and goes': 'intermittent',
+    'flares': 'intermittent',
+    'progressive': 'progressive',
+    'worsening': 'progressive',
+    'degenerative': 'progressive',
+    'getting worse': 'progressive',
+    'unspecified': 'unspecified',
+    'unknown': 'unspecified',
+    'unclear': 'unspecified',
+    '': 'unspecified',
+    None: 'unspecified',
+}
+
+# Diagnosis status normalization
+DIAGNOSIS_STATUS_MAP = {
+    'confirmed': 'confirmed',
+    'diagnosed': 'confirmed',
+    'professionally diagnosed': 'confirmed',
+    'doctor diagnosed': 'confirmed',
+    'official': 'confirmed',
+    'self_diagnosed': 'self_diagnosed',
+    'self-diagnosed': 'self_diagnosed',
+    'self diagnosed': 'self_diagnosed',
+    'suspected': 'suspected',
+    'possible': 'suspected',
+    'likely': 'suspected',
+    'probably': 'suspected',
+    'clinical': 'clinical',
+    'clinically diagnosed': 'clinical',
+    'genetic': 'genetic',
+    'genetically confirmed': 'genetic',
+    'seeking': 'seeking',
+    'pursuing': 'seeking',
+    'trying to get diagnosed': 'seeking',
+    'waiting for diagnosis': 'seeking',
+    'lost': 'lost',
+    'dismissed': 'lost',
+    'misdiagnosed': 'lost',
+    'reversed': 'lost',
+    'unclear': 'unclear',
+    'unknown': 'unclear',
+    'unspecified': 'unclear',
+    '': 'unclear',
+    None: 'unclear',
+}
+
+# EDS subtype normalization
+EDS_SUBTYPE_MAP = {
+    'heds': 'hEDS',
+    'h-eds': 'hEDS',
+    'hypermobile': 'hEDS',
+    'hypermobile eds': 'hEDS',
+    'hypermobile type': 'hEDS',
+    'veds': 'vEDS',
+    'v-eds': 'vEDS',
+    'vascular': 'vEDS',
+    'vascular eds': 'vEDS',
+    'vascular type': 'vEDS',
+    'ceds': 'cEDS',
+    'c-eds': 'cEDS',
+    'classical': 'cEDS',
+    'classical eds': 'cEDS',
+    'classical type': 'cEDS',
+    'cleds': 'clEDS',
+    'classical-like': 'clEDS',
+    'keds': 'kEDS',
+    'k-eds': 'kEDS',
+    'kyphoscoliotic': 'kEDS',
+    'hsd': 'HSD',
+    'hypermobility spectrum': 'HSD',
+    'hypermobility spectrum disorder': 'HSD',
+    'unspecified': None,
+    'unknown': None,
+    'unclear': None,
+    '': None,
+    None: None,
+}
+
+# Severity normalization
+SEVERITY_MAP = {
+    'mild': 'mild',
+    'slight': 'mild',
+    'minor': 'mild',
+    'moderate': 'moderate',
+    'medium': 'moderate',
+    'severe': 'severe',
+    'extreme': 'severe',
+    'debilitating': 'severe',
+    'intense': 'severe',
+    'unspecified': 'unspecified',
+    'unknown': 'unspecified',
+    'unclear': 'unspecified',
+    '': 'unspecified',
+    None: 'unspecified',
+}
+
+# Sentiment normalization
+SENTIMENT_MAP = {
+    'validated': 'validated',
+    'relieved': 'relieved',
+    'frustrated': 'frustrated',
+    'angry': 'frustrated',
+    'upset': 'frustrated',
+    'questioning': 'questioning',
+    'uncertain': 'questioning',
+    'doubtful': 'questioning',
+    'neutral': 'neutral',
+    'unspecified': 'neutral',
+    '': 'neutral',
+    None: 'neutral',
+}
+
+
+def _normalize_value(value: Any, mapping: Dict, default: Any) -> Any:
+    """Normalize a value using a mapping, with fallback to default."""
+    if value is None:
+        return mapping.get(None, default)
+    
+    # Try exact match first
+    value_lower = str(value).lower().strip()
+    if value_lower in mapping:
+        return mapping[value_lower]
+    
+    # Try partial match
+    for key, mapped_value in mapping.items():
+        if key and value_lower in str(key).lower():
+            return mapped_value
+    
+    return default
+
+
+# =============================================================================
 # Symptom Operations
 # =============================================================================
 
@@ -882,6 +1031,10 @@ def insert_symptom(video_id: int, category: str, symptom: str,
                   confidence: float, context: Optional[str] = None,
                   **kwargs) -> int:
     """Insert a symptom record with enhanced tracking."""
+    # Normalize values to valid database constraints
+    severity = _normalize_value(kwargs.get('severity'), SEVERITY_MAP, 'unspecified')
+    temporal_pattern = _normalize_value(kwargs.get('temporal_pattern'), TEMPORAL_PATTERN_MAP, 'unspecified')
+    
     with get_connection() as conn:
         cur = conn.cursor()
         cur.execute("""
@@ -894,8 +1047,8 @@ def insert_symptom(video_id: int, category: str, symptom: str,
             RETURNING id
         """, (
             video_id, category, symptom, confidence, context,
-            kwargs.get('severity', 'unspecified'),
-            kwargs.get('temporal_pattern', 'unspecified'),
+            severity,
+            temporal_pattern,
             kwargs.get('body_location'), kwargs.get('triggers', []),
             kwargs.get('is_personal_experience', True),
             kwargs.get('extractor_model'), kwargs.get('extractor_provider')
@@ -919,15 +1072,18 @@ def insert_claimed_diagnosis(video_id: int, condition_code: str, condition_name:
                             confidence: float, context: Optional[str] = None,
                             **kwargs) -> int:
     """Insert a claimed diagnosis record with enhanced fields."""
+    # Normalize values to valid database constraints
+    diagnosis_status = _normalize_value(kwargs.get('diagnosis_status'), DIAGNOSIS_STATUS_MAP, 'unclear')
+    eds_subtype = _normalize_value(kwargs.get('eds_subtype'), EDS_SUBTYPE_MAP, None)
+    sentiment = _normalize_value(kwargs.get('sentiment'), SENTIMENT_MAP, 'neutral')
+    
+    # Map is_self_diagnosed to diagnosis_status for backward compatibility
+    is_self_diagnosed = kwargs.get('is_self_diagnosed')
+    if kwargs.get('diagnosis_status') is None and is_self_diagnosed is not None:
+        diagnosis_status = 'self_diagnosed' if is_self_diagnosed else 'confirmed'
+    
     with get_connection() as conn:
         cur = conn.cursor()
-        
-        # Map is_self_diagnosed to diagnosis_status for backward compatibility
-        diagnosis_status = kwargs.get('diagnosis_status')
-        is_self_diagnosed = kwargs.get('is_self_diagnosed')
-        if diagnosis_status is None and is_self_diagnosed is not None:
-            diagnosis_status = 'self_diagnosed' if is_self_diagnosed else 'confirmed'
-        
         cur.execute("""
             INSERT INTO claimed_diagnoses (
                 video_id, condition_code, condition_name, confidence, context,
@@ -942,9 +1098,9 @@ def insert_claimed_diagnosis(video_id: int, condition_code: str, condition_name:
             diagnosis_status,
             is_self_diagnosed,
             kwargs.get('diagnosis_date_mentioned'),
-            kwargs.get('eds_subtype'),
+            eds_subtype,
             kwargs.get('diagnosing_specialty'),
-            kwargs.get('sentiment'),
+            sentiment,
             kwargs.get('mentioned_with', []),
             kwargs.get('extractor_model'),
             kwargs.get('extractor_provider')

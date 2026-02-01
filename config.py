@@ -17,8 +17,11 @@ DATABASE_URL = os.getenv(
 
 # API Keys / Providers
 ANTHROPIC_API_KEY = os.getenv('ANTHROPIC_API_KEY')
+DEEPSEEK_API_KEY = os.getenv('DEEPSEEK_API_KEY')
 EXTRACTOR_PROVIDER = os.getenv('EXTRACTOR_PROVIDER', 'anthropic')
 ANTHROPIC_MODEL = os.getenv('ANTHROPIC_MODEL', 'claude-opus-4-5-20251101')
+DEEPSEEK_MODEL = os.getenv('DEEPSEEK_MODEL', 'deepseek-chat')  # or deepseek-reasoner
+DEEPSEEK_URL = os.getenv('DEEPSEEK_URL', 'https://api.deepseek.com')
 OLLAMA_URL = os.getenv('OLLAMA_URL', 'http://localhost:11434')
 OLLAMA_MODEL = os.getenv('OLLAMA_MODEL', 'gpt-oss:20b')
 HF_TOKEN = os.getenv('HF_TOKEN')
@@ -59,11 +62,14 @@ def validate_config():
     """Validate required configuration is present."""
     errors = []
 
-    if EXTRACTOR_PROVIDER not in {'anthropic', 'ollama'}:
-        errors.append("EXTRACTOR_PROVIDER must be 'anthropic' or 'ollama'")
+    if EXTRACTOR_PROVIDER not in {'anthropic', 'ollama', 'deepseek'}:
+        errors.append("EXTRACTOR_PROVIDER must be 'anthropic', 'ollama', or 'deepseek'")
 
     if EXTRACTOR_PROVIDER == 'anthropic' and not ANTHROPIC_API_KEY:
         errors.append("ANTHROPIC_API_KEY is not set")
+    
+    if EXTRACTOR_PROVIDER == 'deepseek' and not DEEPSEEK_API_KEY:
+        errors.append("DEEPSEEK_API_KEY is not set")
 
     if TRANSCRIBER_BACKEND not in {'faster-whisper', 'openai-whisper'}:
         errors.append("TRANSCRIBER_BACKEND must be 'faster-whisper' or 'openai-whisper'")

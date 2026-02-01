@@ -273,7 +273,7 @@ uv run python pipeline.py extract --all --max-song-ratio 0.3 --min-words 30
 | `--max-song-ratio` | 0.2 | Skip videos with song_lyrics_ratio >= this |
 | `--min-words` | 20 | Skip transcripts with fewer words |
 | `--min-confidence` | 0.6 | Minimum confidence for symptoms |
-| `--provider` | ollama | LLM provider (ollama or anthropic) |
+| `--provider` | ollama | LLM provider (ollama, deepseek, or anthropic) |
 | `--model` | gpt-oss:20b | LLM model name |
 | `--force` | - | Re-extract all videos (clears previous extraction status) |
 | `--thinking` | - | Enable Qwen3 `/think` mode for deeper reasoning (slower) |
@@ -516,7 +516,7 @@ uv run python scripts/retranscribe.py --video-ids 217 239 --backup --provider ol
 | `--start-from N` | Start from video ID N (skip earlier) |
 | `--video-ids` | Process only specific video IDs |
 | `--limit N` | Process only first N videos |
-| `--provider` | LLM provider (default: ollama) |
+| `--provider` | LLM provider: ollama, deepseek, or anthropic (default: ollama) |
 | `--model` | LLM model (default: gpt-oss:20b) |
 
 This ensures dataset consistency for publication.
@@ -710,15 +710,20 @@ Environment variables in `.env`:
 # Database
 DATABASE_URL=postgresql://user:pass@localhost/tiktok_disorders
 
-# Extraction (choose one)
-EXTRACTOR_PROVIDER=anthropic  # or 'ollama'
-ANTHROPIC_API_KEY=sk-...
-ANTHROPIC_MODEL=claude-sonnet-4-20250514
-
-# Or for local extraction with Ollama
+# Extraction (choose one: ollama, deepseek, or anthropic)
 EXTRACTOR_PROVIDER=ollama
 OLLAMA_URL=http://localhost:11434
 OLLAMA_MODEL=gpt-oss:20b
+
+# Or use DeepSeek API (cost-effective cloud option)
+EXTRACTOR_PROVIDER=deepseek
+DEEPSEEK_API_KEY=sk-...
+DEEPSEEK_MODEL=deepseek-chat  # or deepseek-reasoner
+
+# Or use Anthropic Claude
+EXTRACTOR_PROVIDER=anthropic
+ANTHROPIC_API_KEY=sk-...
+ANTHROPIC_MODEL=claude-sonnet-4-20250514
 
 # Transcription
 WHISPER_MODEL=large-v3
@@ -817,6 +822,41 @@ When using `gpt-oss:20b` or similar high-capability models, the pipeline automat
 4. **Extended Timeouts** - 5-minute timeout for thorough reasoning
 
 The pipeline detects `qwen3`, `gpt-oss`, `qwen2.5:20b`, `llama3:70b`, `mixtral`, and `medgemma` as high-capability models.
+
+## Running with DeepSeek API
+
+DeepSeek offers a cost-effective cloud API with strong reasoning capabilities. It uses an OpenAI-compatible API format.
+
+### Setup DeepSeek
+
+1. Get an API key from [DeepSeek Platform](https://platform.deepseek.com/)
+2. Add to your `.env` file:
+
+```bash
+DEEPSEEK_API_KEY=sk-your-api-key-here
+```
+
+### Run Pipeline with DeepSeek
+
+```powershell
+# DeepSeek V3.2 (fast, cost-effective)
+uv run python pipeline.py extract --all --provider deepseek --model deepseek-chat
+
+# DeepSeek V3.2 with thinking mode (deeper reasoning)
+uv run python pipeline.py extract --all --provider deepseek --model deepseek-reasoner
+
+# Full pipeline with DeepSeek
+uv run python pipeline.py run --urls-file urls.txt --provider deepseek --model deepseek-chat --tags EDS MCAS POTS
+```
+
+### DeepSeek Models
+
+| Model | Description | Pricing (approx) |
+|-------|-------------|------------------|
+| `deepseek-chat` | DeepSeek-V3.2 non-thinking mode, fast extraction | ~$0.14/M input, $0.28/M output |
+| `deepseek-reasoner` | DeepSeek-V3.2 thinking mode, deep reasoning | ~$0.55/M input, $2.19/M output |
+
+DeepSeek is a great middle-ground between free local models (Ollama) and premium APIs (Anthropic).
 
 ## Output
 
