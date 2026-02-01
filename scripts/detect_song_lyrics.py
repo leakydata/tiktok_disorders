@@ -295,8 +295,11 @@ def process_transcript(transcript: dict, model: str, ollama_url: str,
     Uses BOTH heuristics and LLM to estimate song_lyrics_ratio (0.0-1.0).
     LLM ratio weighted more heavily than heuristic (2x weight).
     
+    IMPORTANT: Uses original_text if available (for cleaned transcripts) because
+    song detection relies on repetition patterns that cleaning removes.
+    
     Args:
-        transcript: Dict with video_id, text, word_count
+        transcript: Dict with video_id, text, original_text (optional), word_count
         model: Ollama model name
         ollama_url: Ollama server URL  
         dry_run: If True, don't update database
@@ -304,8 +307,13 @@ def process_transcript(transcript: dict, model: str, ollama_url: str,
         verbose: If True, print detailed logging
     """
     video_id = transcript['video_id']
-    text = transcript['text']
+    # Use original_text if available (pre-cleaning), otherwise use current text
+    # This preserves song repetitions that cleaning would have removed
+    text = transcript.get('original_text') or transcript['text']
     word_count = transcript.get('word_count', len(text.split()))
+    
+    if transcript.get('original_text') and verbose:
+        print(f"  [Note] Using original_text (pre-cleaning) for song detection")
     
     if verbose:
         print(f"\n{'='*60}")

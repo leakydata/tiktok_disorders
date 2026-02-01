@@ -251,14 +251,24 @@ Run individual stages when you need to recover from failures:
 uv run python pipeline.py download --urls-file urls.txt
 uv run python pipeline.py download --url "https://tiktok.com/@user/video/123"
 
+# Download all videos from a specific user (discovers + downloads)
+uv run python pipeline.py download --user chronicallychillandhot
+uv run python pipeline.py download --user user1 --user user2 --max-videos 50
+
 # Transcribe all untranscribed videos
 uv run python pipeline.py transcribe --all
 
 # Transcribe a specific video
 uv run python pipeline.py transcribe --video-id 42
 
+# Transcribe only videos from a specific user
+uv run python pipeline.py transcribe --user chronicallychillandhot
+
 # Extract symptoms from all unprocessed transcripts
 uv run python pipeline.py extract --all
+
+# Extract only from a specific user's videos
+uv run python pipeline.py extract --user chronicallychillandhot --provider deepseek
 
 # Re-extract with different settings
 uv run python pipeline.py extract --all --min-confidence 0.8 --provider ollama
@@ -270,8 +280,9 @@ uv run python pipeline.py extract --all --max-song-ratio 0.3 --min-words 30
 **Extract command options:**
 | Option | Default | Description |
 |--------|---------|-------------|
+| `--user` | - | Filter by TikTok username(s) (can use multiple times) |
 | `--max-song-ratio` | 0.2 | Skip videos with song_lyrics_ratio >= this |
-| `--min-words` | 20 | Skip transcripts with fewer words |
+| `--min-words` | 20 | Skip transcripts with fewer words (uses cleaned word count) |
 | `--min-confidence` | 0.6 | Minimum confidence for symptoms |
 | `--provider` | ollama | LLM provider (ollama, deepseek, or anthropic) |
 | `--model` | gpt-oss:20b | LLM model name |
@@ -390,6 +401,7 @@ Reports are saved to `data/reports/` and CSV exports to `data/exports/`.
 | `scripts/init_db.py` | Initialize database schema |
 | `scripts/retranscribe.py` | Re-transcribe and re-extract for consistency |
 | `scripts/detect_song_lyrics.py` | Flag song lyrics transcripts (backfill) |
+| `scripts/clean_transcripts.py` | Remove repeated phrases from transcripts |
 
 ## Example Workflows
 
@@ -596,6 +608,14 @@ TikTok videos often have songs playing instead of the creator speaking. The pipe
 - Run `detect_song_lyrics.py` first to pre-classify before extraction
 - Override threshold: `--max-song-ratio 0.5` to be more lenient
 
+**Recommended workflow order:**
+1. Transcribe videos
+2. Run song lyrics detection (uses repetition patterns)
+3. Clean transcripts (removes Whisper hallucination loops)
+4. Extract symptoms
+
+If transcripts were cleaned before song detection, the script automatically uses `original_text` (preserved during cleaning) to preserve the repetition patterns needed for accurate detection.
+
 **Backfill existing transcripts:**
 ```powershell
 # Check statistics (with ratio breakdown)
@@ -675,7 +695,7 @@ This means you can:
 
 ### Core Tables
 - `videos` - Video metadata, engagement metrics, author info, creator tier
-- `transcripts` - Transcribed text with model provenance, song lyrics ratio, extraction timestamp
+- `transcripts` - Transcribed text with model provenance, song lyrics ratio, extraction timestamp, `original_text` (preserved when cleaned), `cleaned_at`
 - `symptoms` - Extracted symptoms with severity, temporal patterns
 - `claimed_diagnoses` - Conditions the speaker claims to have
 - `treatments` - Medications, supplements, therapies mentioned

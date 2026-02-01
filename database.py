@@ -847,11 +847,15 @@ def clear_transcript_extracted(video_id: int) -> bool:
 
 
 def get_transcripts_needing_song_check(limit: int = None) -> List[Dict[str, Any]]:
-    """Get transcripts that haven't been checked for song lyrics (ratio is NULL)."""
+    """Get transcripts that haven't been checked for song lyrics (ratio is NULL).
+    
+    Returns original_text if available (for cleaned transcripts) so song detection
+    can use the pre-cleaned text with repetitions intact.
+    """
     with get_connection() as conn:
         cur = conn.cursor(cursor_factory=RealDictCursor)
         query = """
-            SELECT t.id, t.video_id, t.text, t.word_count, v.title, v.author
+            SELECT t.id, t.video_id, t.text, t.original_text, t.word_count, v.title, v.author
             FROM transcripts t
             JOIN videos v ON t.video_id = v.id
             WHERE t.song_lyrics_ratio IS NULL
