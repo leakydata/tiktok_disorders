@@ -405,17 +405,34 @@ def cmd_run(args):
 
 def cmd_download(args):
     """Handle the 'download' subcommand - download only."""
+    from scripts.discover import get_user_videos
+    
     downloader = VideoDownloader()
+    urls = []
 
     if args.url:
         urls = [args.url]
     elif args.urls_file:
         urls = read_urls_file(args.urls_file)
+    elif getattr(args, 'user', None):
+        # Discover videos for user(s) first
+        print(f"Discovering videos for user(s): {', '.join(args.user)}")
+        for username in args.user:
+            try:
+                user_urls = get_user_videos(username, max_videos=getattr(args, 'max_videos', None))
+                print(f"  Found {len(user_urls)} videos for @{username}")
+                urls.extend(user_urls)
+            except Exception as e:
+                print(f"  Error discovering @{username}: {e}")
+        
+        if not urls:
+            print("No videos found for the specified user(s)")
+            return 1
     else:
-        print("Error: Provide --url or --urls-file")
+        print("Error: Provide --url, --urls-file, or --user")
         return 1
 
-    print(f"Downloading {len(urls)} video(s)...")
+    print(f"\nDownloading {len(urls)} video(s)...")
     success_count = 0
     for i, url in enumerate(urls, 1):
         print(f"\n[{i}/{len(urls)}] {url}")
@@ -865,7 +882,9 @@ Examples:
     dl_parser = subparsers.add_parser('download', help='Download videos only')
     dl_parser.add_argument('--url', help='Single video URL')
     dl_parser.add_argument('--urls-file', help='Path to text file with URLs')
+    dl_parser.add_argument('--user', action='append', help='TikTok username(s) to discover and download')
     dl_parser.add_argument('--tags', nargs='+', default=[], help='Tags for videos')
+    dl_parser.add_argument('--max-videos', type=int, help='Max videos per user (default: all)')
     dl_parser.set_defaults(func=cmd_download)
 
     # --- transcribe subcommand ---
