@@ -84,7 +84,7 @@ class SymptomAnalyzer:
             """
             df = pd.read_sql(query, conn, params=(self.min_confidence,))
 
-        print(f"✓ Loaded {len(df)} symptoms from {df['video_id'].nunique()} videos")
+        print(f"Loaded {len(df)} symptoms from {df['video_id'].nunique()} videos")
 
         # Print summary of enhanced fields
         if len(df) > 0:
@@ -191,7 +191,7 @@ class SymptomAnalyzer:
         features = scaler.fit_transform(features)
         self.scaler = scaler
 
-        print(f"✓ Created feature matrix: {features.shape}")
+        print(f"Created feature matrix: {features.shape}")
         return features
 
     def cluster_kmeans(self, features: np.ndarray, n_clusters: Optional[int] = None,
@@ -216,7 +216,7 @@ class SymptomAnalyzer:
             print("Optimizing cluster count...")
             max_k = min(50, len(features) // 5, len(features) - 1)
             if max_k < 3:
-                print(f"⚠ Dataset too small for optimization, using k=2")
+                print(f"Dataset too small for optimization, using k=2")
                 n_clusters = 2
             else:
                 k_range = range(2, max_k + 1)
@@ -242,10 +242,10 @@ class SymptomAnalyzer:
 
                     # Average of elbow and silhouette suggestions
                     n_clusters = (optimal_k + best_silhouette_k) // 2
-                    print(f"✓ Optimal k: {n_clusters} (elbow: {optimal_k}, silhouette: {best_silhouette_k})")
+                    print(f"Optimal k: {n_clusters} (elbow: {optimal_k}, silhouette: {best_silhouette_k})")
                 else:
                     n_clusters = 3
-                    print(f"✓ Using default k={n_clusters} (dataset too small for optimization)")
+                    print(f"Using default k={n_clusters} (dataset too small for optimization)")
 
         # Perform clustering
         print(f"Performing K-means clustering with k={n_clusters}...")
@@ -270,12 +270,12 @@ class SymptomAnalyzer:
             metrics['davies_bouldin_score'] = float(davies_bouldin_score(features, labels))
             metrics['calinski_harabasz_score'] = float(calinski_harabasz_score(features, labels))
 
-            print(f"✓ Clustering complete: {n_clusters} clusters")
+            print(f"Clustering complete: {n_clusters} clusters")
             print(f"  Silhouette Score: {metrics['silhouette_score']:.3f} (higher is better, -1 to 1)")
             print(f"  Davies-Bouldin Index: {metrics['davies_bouldin_score']:.3f} (lower is better)")
             print(f"  Calinski-Harabasz Index: {metrics['calinski_harabasz_score']:.1f} (higher is better)")
         else:
-            print(f"✓ Clustering complete: {n_clusters} clusters (metrics require >1 cluster)")
+            print(f"Clustering complete: {n_clusters} clusters (metrics require >1 cluster)")
 
         return labels, metrics
 
@@ -313,7 +313,7 @@ class SymptomAnalyzer:
                 metrics['silhouette_score'] = float(silhouette_score(features[valid_mask], labels[valid_mask]))
                 print(f"  Silhouette Score (excl. noise): {metrics['silhouette_score']:.3f}")
 
-        print(f"✓ Found {n_clusters} clusters, {n_noise} noise points")
+        print(f"Found {n_clusters} clusters, {n_noise} noise points")
         return labels, metrics
 
     def reduce_dimensions(self, features: np.ndarray, method: str = 'umap',
@@ -335,7 +335,7 @@ class SymptomAnalyzer:
             reducer = PCA(n_components=n_components, random_state=42)
             reduced = reducer.fit_transform(features)
             explained_var = sum(reducer.explained_variance_ratio_) * 100
-            print(f"✓ PCA complete: {explained_var:.1f}% variance explained")
+            print(f"PCA complete: {explained_var:.1f}% variance explained")
 
         elif method == 'tsne':
             perplexity = min(30, max(5, len(features) // 4))
@@ -348,7 +348,7 @@ class SymptomAnalyzer:
                 n_jobs=-1
             )
             reduced = reducer.fit_transform(features)
-            print(f"✓ t-SNE complete (perplexity={perplexity})")
+            print(f"t-SNE complete (perplexity={perplexity})")
 
         elif method == 'umap':
             if UMAP is None:
@@ -362,7 +362,7 @@ class SymptomAnalyzer:
                 metric='cosine'
             )
             reduced = reducer.fit_transform(features)
-            print(f"✓ UMAP complete (n_neighbors={n_neighbors})")
+            print(f"UMAP complete (n_neighbors={n_neighbors})")
 
         else:
             raise ValueError(f"Unknown method: {method}")
@@ -483,7 +483,7 @@ class SymptomAnalyzer:
             save_path = VISUALIZATION_DIR / f'clusters_{method}_{timestamp}.png'
 
         plt.savefig(save_path, dpi=300, bbox_inches='tight')
-        print(f"✓ Visualization saved: {save_path}")
+        print(f"Visualization saved: {save_path}")
 
         plt.close()
         return save_path
@@ -514,7 +514,7 @@ class SymptomAnalyzer:
                 'degrees_of_freedom': int(dof),
                 'significant': p_value < 0.05
             }
-            print(f"Category distribution χ²: {chi2:.2f}, p={p_value:.4f} {'(significant)' if p_value < 0.05 else ''}")
+            print(f"Category distribution chi2: {chi2:.2f}, p={p_value:.4f} {'(significant)' if p_value < 0.05 else ''}")
 
         # Chi-square for severity if available
         if 'severity' in df_test.columns and df_test['severity'].notna().any():
@@ -526,7 +526,7 @@ class SymptomAnalyzer:
                 'degrees_of_freedom': int(dof),
                 'significant': p_value < 0.05
             }
-            print(f"Severity distribution χ²: {chi2:.2f}, p={p_value:.4f} {'(significant)' if p_value < 0.05 else ''}")
+            print(f"Severity distribution chi2: {chi2:.2f}, p={p_value:.4f} {'(significant)' if p_value < 0.05 else ''}")
 
         # ANOVA for confidence scores across clusters
         cluster_groups = [group['confidence'].values for _, group in df_test.groupby('cluster')]
@@ -620,7 +620,7 @@ class SymptomAnalyzer:
             output_path = VISUALIZATION_DIR / f'symptom_clusters_{timestamp}.csv'
 
         df_export.to_csv(output_path, index=False)
-        print(f"✓ Results exported: {output_path}")
+        print(f"Results exported: {output_path}")
 
         return output_path
 
@@ -634,7 +634,7 @@ if __name__ == '__main__':
         df = analyzer.load_symptom_data()
 
         if len(df) < 10:
-            print("⚠ Not enough data for meaningful analysis (need at least 10 symptoms)")
+            print("Not enough data for meaningful analysis (need at least 10 symptoms)")
         else:
             # Prepare features using enhanced method
             features = analyzer.prepare_features(df, method='enhanced')
@@ -660,11 +660,11 @@ if __name__ == '__main__':
             # Export
             export_path = analyzer.export_results(df, labels)
 
-            print(f"\n✓ Analysis complete!")
+            print(f"\nAnalysis complete!")
             print(f"  Visualization: {viz_path}")
             print(f"  Export: {export_path}")
 
     except Exception as e:
-        print(f"✗ Error: {e}")
+        print(f"Error: {e}")
         import traceback
         traceback.print_exc()

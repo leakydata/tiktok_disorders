@@ -103,7 +103,7 @@ def clean_all_transcripts(dry_run: bool = False, limit: int = None, verbose: boo
             print(f"  Average reduction: {total_chars_saved / cleaned_count:.0f} chars per transcript")
         
         if not dry_run and cleaned_count > 0:
-            print(f"\n✓ Original text preserved in 'original_text' column")
+            print(f"\nOriginal text preserved in 'original_text' column")
             print(f"  To revert: uv run python scripts/clean_transcripts.py --revert")
 
 

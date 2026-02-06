@@ -557,7 +557,7 @@ Return ONLY the JSON array, no additional text."""
 
         # Check if transcript is too short
         if len(transcript_text.split()) < 20:
-            print(f"⚠ Transcript too short ({len(transcript_text.split())} words), skipping")
+            print(f"Transcript too short ({len(transcript_text.split())} words), skipping")
             return {'video_id': video_id, 'symptoms_found': 0, 'symptoms_saved': 0}
 
         print(f"Extracting symptoms from video {video_id} ({len(transcript_text)} chars)...")
@@ -593,7 +593,7 @@ Return ONLY the JSON array, no additional text."""
                     )
                     saved_count += 1
 
-            print(f"✓ Extracted {len(symptoms)} symptoms, saved {saved_count} (confidence >= {min_conf})")
+            print(f"Extracted {len(symptoms)} symptoms, saved {saved_count} (confidence >= {min_conf})")
 
             return {
                 'video_id': video_id,
@@ -604,7 +604,7 @@ Return ONLY the JSON array, no additional text."""
             }
 
         except json.JSONDecodeError as e:
-            print(f"✗ Failed to parse model response: {e}")
+            print(f"Failed to parse model response: {e}")
             print(f"Response text: {response_text[:500]}...")
             return {
                 'video_id': video_id,
@@ -613,7 +613,7 @@ Return ONLY the JSON array, no additional text."""
             }
 
         except Exception as e:
-            print(f"✗ Error extracting symptoms: {e}")
+            print(f"Error extracting symptoms: {e}")
             return {
                 'video_id': video_id,
                 'success': False,
@@ -771,7 +771,7 @@ TRANSCRIPT:
                     diagnosis_ids.append(diag_id)
                     saved_count += 1
 
-            print(f"✓ Extracted {len(diagnoses)} diagnoses, saved {saved_count}")
+            print(f"Extracted {len(diagnoses)} diagnoses, saved {saved_count}")
 
             return {
                 'video_id': video_id,
@@ -782,7 +782,7 @@ TRANSCRIPT:
             }
 
         except Exception as e:
-            print(f"✗ Error extracting diagnoses: {e}")
+            print(f"Error extracting diagnoses: {e}")
             return {
                 'video_id': video_id,
                 'success': False,
@@ -883,7 +883,7 @@ TRANSCRIPT:
                     )
                     saved_count += 1
 
-            print(f"✓ Extracted {len(treatments)} treatments, saved {saved_count}")
+            print(f"Extracted {len(treatments)} treatments, saved {saved_count}")
 
             return {
                 'video_id': video_id,
@@ -893,7 +893,7 @@ TRANSCRIPT:
             }
 
         except Exception as e:
-            print(f"✗ Error extracting treatments: {e}")
+            print(f"Error extracting treatments: {e}")
             return {
                 'video_id': video_id,
                 'success': False,
@@ -1046,7 +1046,7 @@ Return ONLY the JSON object, no additional text."""
         # Check if song lyrics ratio exceeds threshold
         song_ratio = transcript_data.get('song_lyrics_ratio')
         if song_ratio is not None and song_ratio >= self.max_song_ratio:
-            print(f"⏭ Skipping video {video_id} - song lyrics ratio {song_ratio:.0%} >= {self.max_song_ratio:.0%} threshold")
+            print(f"Skipping video {video_id} - song lyrics ratio {song_ratio:.0%} >= {self.max_song_ratio:.0%} threshold")
             return {
                 'video_id': video_id,
                 'success': True,
@@ -1175,7 +1175,7 @@ Return ONLY the JSON object, no additional text."""
             if data.get('is_song_lyrics') is True:
                 # Set high ratio (0.9 = 90% lyrics)
                 update_transcript_song_lyrics_ratio(video_id, 0.9)
-                print(f"🎵 Video {video_id} detected as song lyrics during extraction - skipping")
+                print(f"Video {video_id} detected as song lyrics during extraction - skipping")
                 return {
                     'video_id': video_id,
                     'success': True,
@@ -1327,7 +1327,7 @@ Return ONLY the JSON object, no additional text."""
         if transcript_data:
             song_ratio = transcript_data.get('song_lyrics_ratio')
             if song_ratio is not None and song_ratio >= self.max_song_ratio:
-                print(f"⏭ Skipping video {video_id} - song lyrics ratio {song_ratio:.0%} >= {self.max_song_ratio:.0%} threshold")
+                print(f"Skipping video {video_id} - song lyrics ratio {song_ratio:.0%} >= {self.max_song_ratio:.0%} threshold")
                 return {
                     'video_id': video_id,
                     'success': True,
@@ -1518,11 +1518,11 @@ Return ONLY the JSON object, no additional text."""
                         result = future.result()
                         results.append(result)
                         if result.get('success', False):
-                            print(f"[{i}/{len(video_ids)}] ✓ Video {video_id}: {result['symptoms_saved']} symptoms")
+                            print(f"[{i}/{len(video_ids)}] Video {video_id}: {result['symptoms_saved']} symptoms")
                         else:
-                            print(f"[{i}/{len(video_ids)}] ✗ Video {video_id}: {result.get('error', 'Unknown error')}")
+                            print(f"[{i}/{len(video_ids)}] FAILED Video {video_id}: {result.get('error', 'Unknown error')}")
                     except Exception as e:
-                        print(f"[{i}/{len(video_ids)}] ✗ Video {video_id}: {e}")
+                        print(f"[{i}/{len(video_ids)}] FAILED Video {video_id}: {e}")
                         results.append({'video_id': video_id, 'success': False, 'error': str(e)})
         else:
             # Sequential processing
@@ -1535,7 +1535,7 @@ Return ONLY the JSON object, no additional text."""
         # Summary
         success_count = sum(1 for r in results if r.get('success', False))
         total_symptoms = sum(r.get('symptoms_saved', 0) for r in results if r.get('success', False))
-        print(f"\n✓ Successfully processed {success_count}/{len(video_ids)} videos")
+        print(f"\nSuccessfully processed {success_count}/{len(video_ids)} videos")
         print(f"  Total symptoms extracted: {total_symptoms}")
 
         return results
@@ -1581,5 +1581,5 @@ if __name__ == '__main__':
         print(f"\nExtraction Result:")
         print(json.dumps(result, indent=2))
     except Exception as e:
-        print(f"✗ Error: {e}")
+        print(f"Error: {e}")
         sys.exit(1)

@@ -78,12 +78,12 @@ def main() -> int:
 
     transcript_dir = Path(args.dir)
     if not transcript_dir.exists():
-        print(f"✗ Transcript directory not found: {transcript_dir}")
+        print(f"Transcript directory not found: {transcript_dir}")
         return 1
 
     files = sorted(transcript_dir.glob("*.json"))
     if not files:
-        print(f"✗ No transcript JSON files found in: {transcript_dir}")
+        print(f"No transcript JSON files found in: {transcript_dir}")
         return 1
 
     inserted = 0
@@ -93,7 +93,7 @@ def main() -> int:
         try:
             data = _load_transcript(path)
         except Exception as e:
-            print(f"✗ Failed to read {path.name}: {e}")
+            print(f"Failed to read {path.name}: {e}")
             continue
 
         source_id = str(data.get("video_id") or path.stem)
@@ -112,12 +112,12 @@ def main() -> int:
         )
         inserted += 1
 
-    print(f"✓ Backfill complete: {inserted} inserted, {skipped} skipped")
+    print(f"Backfill complete: {inserted} inserted, {skipped} skipped")
 
     if args.extract:
         video_ids = _get_videos_missing_symptoms()
         if not video_ids:
-            print("✓ No transcripts pending symptom extraction")
+            print("No transcripts pending symptom extraction")
             return 0
 
         extractor = SymptomExtractor(

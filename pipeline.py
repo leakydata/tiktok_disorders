@@ -123,7 +123,7 @@ class ResearchPipeline:
                 self.stats['treatments_extracted'] += treatments_data.get('treatments_saved', 0)
 
             print(f"\n{'='*80}")
-            print(f"✓ Pipeline complete for: {url}")
+            print(f"Pipeline complete for: {url}")
             print(f"  Downloaded: {download_result['audio_path']}")
             print(f"  Transcribed: {transcript_result.get('word_count', 'N/A')} words")
             if transcript_result.get('quality_score'):
@@ -140,7 +140,7 @@ class ResearchPipeline:
             print('='*80)
 
         except Exception as e:
-            print(f"\n✗ Pipeline failed for {url}: {e}")
+            print(f"\nPipeline failed for {url}: {e}")
             result['success'] = False
             result['error'] = str(e)
             self.stats['errors'].append({'url': url, 'error': str(e)})
@@ -224,7 +224,7 @@ class ResearchPipeline:
                     update_pipeline_progress(self.current_run_id, url, 'failed',
                                            error_message=result.get('error', 'Unknown error'))
             except Exception as e:
-                print(f"✗ Unhandled error for {url}: {e}")
+                print(f"Error for {url}: {e}")
                 update_pipeline_progress(self.current_run_id, url, 'failed', error_message=str(e))
                 results.append({'url': url, 'success': False, 'error': str(e)})
 
@@ -303,7 +303,7 @@ class ResearchPipeline:
         # Export
         export_path = self.analyzer.export_results(df, labels)
 
-        print(f"\n✓ Analysis complete!")
+        print(f"\nAnalysis complete!")
         print(f"  Found {report['n_clusters']} clusters from {report['total_symptoms']} symptoms")
         print(f"  Visualization: {viz_path}")
         print(f"  Export: {export_path}")

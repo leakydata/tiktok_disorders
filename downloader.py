@@ -147,7 +147,7 @@ class VideoDownloader:
         # Check if already downloaded (exact URL match)
         existing = get_video_by_url(url)
         if existing and existing.get('audio_path'):
-            print(f"✓ Video already downloaded: {existing['audio_path']}")
+            print(f"Video already downloaded: {existing['audio_path']}")
             return {
                 'video_id': existing['id'],
                 'audio_path': existing['audio_path'],
@@ -168,7 +168,7 @@ class VideoDownloader:
         if duplicate:
             match_type = duplicate['match_type']
             existing_video = duplicate['video']
-            print(f"⚠ Duplicate detected ({match_type}): already have this video as ID {existing_video['id']}")
+            print(f"Duplicate detected ({match_type}): already have this video as ID {existing_video['id']}")
             if existing_video.get('audio_path'):
                 return {
                     'video_id': existing_video['id'],
@@ -233,7 +233,7 @@ class VideoDownloader:
 
         db_id = insert_video(url, platform, video_id, metadata)
 
-        print(f"✓ Audio downloaded: {output_path} ({file_size / 1024 / 1024:.2f} MB)")
+        print(f"Audio downloaded: {output_path} ({file_size / 1024 / 1024:.2f} MB)")
 
         return {
             'video_id': db_id,
@@ -265,12 +265,12 @@ class VideoDownloader:
                 result = self.download_audio(url, tags)
                 results.append({'url': url, 'success': True, 'data': result})
             except Exception as e:
-                print(f"✗ Error downloading {url}: {e}")
+                print(f"Error downloading {url}: {e}")
                 results.append({'url': url, 'success': False, 'error': str(e)})
 
         # Summary
         success_count = sum(1 for r in results if r['success'])
-        print(f"\n✓ Successfully downloaded {success_count}/{len(urls)} videos")
+        print(f"\nSuccessfully downloaded {success_count}/{len(urls)} videos")
 
         return results
 

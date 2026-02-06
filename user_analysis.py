@@ -136,22 +136,22 @@ def print_user_timeline(username: str):
     
     for entry in timeline:
         date_str = format_date(entry.get('upload_date'))
-        print(f"\n📅 {date_str} | Video #{entry['video_id']}")
+        print(f"\n[{date_str}] Video #{entry['video_id']}")
         
         if entry.get('title'):
             title = entry['title'][:60] + "..." if len(entry.get('title', '')) > 60 else entry.get('title', '')
             print(f"   {title}")
         
         if entry.get('diagnoses_mentioned'):
-            print(f"   🏥 Diagnoses: {', '.join(entry['diagnoses_mentioned'])}")
+            print(f"   Diagnoses: {', '.join(entry['diagnoses_mentioned'])}")
         
         if entry.get('symptom_count'):
             categories = entry.get('symptom_categories', [])
             cat_str = ", ".join([str(c) for c in categories if c]) if categories else "N/A"
-            print(f"   🩺 Symptoms: {entry['symptom_count']} ({cat_str})")
+            print(f"   Symptoms: {entry['symptom_count']} ({cat_str})")
         
         if entry.get('content_type'):
-            print(f"   📝 Content type: {entry['content_type']}")
+            print(f"   Content type: {entry['content_type']}")
         
         flags = []
         if entry.get('mentions_self_diagnosis'):
@@ -159,7 +159,7 @@ def print_user_timeline(username: str):
         if entry.get('mentions_professional_diagnosis'):
             flags.append("professional diagnosis")
         if flags:
-            print(f"   🚩 Flags: {', '.join(flags)}")
+            print(f"   Flags: {', '.join(flags)}")
     
     print("\n" + "=" * 70)
 
@@ -181,7 +181,7 @@ def print_concordance_report():
     
     avg_overall = sum(u['avg_concordance'] for u in with_concordance) / len(with_concordance)
     
-    print(f"\n📊 OVERALL STATISTICS")
+    print(f"\nOVERALL STATISTICS")
     print(f"   Total users analyzed: {len(users)}")
     print(f"   Users with concordance data: {len(with_concordance)}")
     print(f"   Overall average concordance: {avg_overall:.2f}")
@@ -191,21 +191,21 @@ def print_concordance_report():
     medium = [u for u in with_concordance if 0.3 <= u['avg_concordance'] < 0.5]
     low = [u for u in with_concordance if u['avg_concordance'] < 0.3]
     
-    print(f"\n📈 CONCORDANCE DISTRIBUTION")
-    print(f"   🟢 High (≥0.5): {len(high)} users ({len(high)/len(with_concordance)*100:.1f}%)")
-    print(f"   🟡 Medium (0.3-0.5): {len(medium)} users ({len(medium)/len(with_concordance)*100:.1f}%)")
-    print(f"   🔴 Low (<0.3): {len(low)} users ({len(low)/len(with_concordance)*100:.1f}%)")
+    print(f"\nCONCORDANCE DISTRIBUTION")
+    print(f"   [HIGH] (>=0.5): {len(high)} users ({len(high)/len(with_concordance)*100:.1f}%)")
+    print(f"   [MED]  (0.3-0.5): {len(medium)} users ({len(medium)/len(with_concordance)*100:.1f}%)")
+    print(f"   [LOW]  (<0.3): {len(low)} users ({len(low)/len(with_concordance)*100:.1f}%)")
     
     # Top high concordance users
     if high:
-        print(f"\n🏆 TOP HIGH-CONCORDANCE USERS")
+        print(f"\nTOP HIGH-CONCORDANCE USERS")
         sorted_high = sorted(high, key=lambda x: x['avg_concordance'], reverse=True)[:10]
         for u in sorted_high:
             print(f"   @{u['username']}: {u['avg_concordance']:.2f} ({u['video_count']} videos, {u['unique_diagnoses']} diagnoses)")
     
     # Users of concern (low concordance)
     if low:
-        print(f"\n⚠️ LOW-CONCORDANCE USERS (potential social contagion)")
+        print(f"\n[!] LOW-CONCORDANCE USERS (potential social contagion)")
         sorted_low = sorted(low, key=lambda x: x['avg_concordance'])[:15]
         for u in sorted_low:
             print(f"   @{u['username']}: {u['avg_concordance']:.2f} ({u['video_count']} videos, {u['unique_diagnoses']} diagnoses)")
@@ -237,7 +237,7 @@ def print_low_concordance_users(threshold: float = 0.3):
     for username, conditions in by_user.items():
         print(f"@{username}")
         for c in conditions:
-            self_diag = "🔴" if c.get('includes_self_diagnosed') else "🟢"
+            self_diag = "[SELF]" if c.get('includes_self_diagnosed') else "[PRO]"
             print(f"   {self_diag} {c['condition_code']}: {c['avg_concordance']:.2f} concordance, "
                   f"{c['avg_core_score']:.2f} core score ({c['video_count']} videos)")
         print()
@@ -267,23 +267,23 @@ def print_diagnosis_patterns():
     # Find users with multiple diagnoses
     multi_diag_users = {u: d for u, d in by_user.items() if len(d) > 1}
     
-    print(f"\n📊 OVERVIEW")
+    print(f"\nOVERVIEW")
     print(f"   Total users with diagnoses: {len(by_user)}")
     print(f"   Users with multiple diagnoses: {len(multi_diag_users)}")
     
     # Common diagnosis sequences
-    print(f"\n🔄 COMMON DIAGNOSIS SEQUENCES")
+    print(f"\nCOMMON DIAGNOSIS SEQUENCES")
     sequences = {}
     for user, diagnoses in multi_diag_users.items():
         sorted_diag = sorted(diagnoses, key=lambda x: x['first_mention_date'] or datetime.min)
-        seq = " → ".join([d['condition_code'] for d in sorted_diag])
+        seq = " -> ".join([d['condition_code'] for d in sorted_diag])
         sequences[seq] = sequences.get(seq, 0) + 1
     
     for seq, count in sorted(sequences.items(), key=lambda x: -x[1])[:15]:
         print(f"   {seq}: {count} users")
     
     # Example users with diagnosis progression
-    print(f"\n👥 EXAMPLE USERS WITH DIAGNOSIS PROGRESSION")
+    print(f"\nEXAMPLE USERS WITH DIAGNOSIS PROGRESSION")
     for username, diagnoses in list(multi_diag_users.items())[:10]:
         sorted_diag = sorted(diagnoses, key=lambda x: x['first_mention_date'] or datetime.min)
         print(f"\n   @{username}:")
@@ -313,7 +313,7 @@ def export_all_profiles(output_path: str):
     with open(output_path, 'w', encoding='utf-8') as f:
         json.dump(all_profiles, f, indent=2, ensure_ascii=False)
     
-    print(f"\n✓ Exported {len(all_profiles)} user profiles to {output_path}")
+    print(f"\nExported {len(all_profiles)} user profiles to {output_path}")
 
 
 def print_symptom_consistency(username: str):
@@ -328,17 +328,17 @@ def print_symptom_consistency(username: str):
     print(f"SYMPTOM CONSISTENCY ANALYSIS: @{username}")
     print("=" * 70)
     
-    print(f"\n📊 OVERVIEW")
+    print(f"\nOVERVIEW")
     print(f"   Videos analyzed: {analysis['video_count']}")
     print(f"   Unique symptoms: {analysis['total_unique_symptoms']}")
     print(f"   Symptoms with inconsistent severity: {analysis['symptoms_with_inconsistent_severity']}")
     
     if analysis['inconsistent_symptoms']:
-        print(f"\n⚠️ INCONSISTENT SEVERITY REPORTING")
+        print(f"\n[!] INCONSISTENT SEVERITY REPORTING")
         for s in analysis['inconsistent_symptoms']:
             severities = s.get('all_severities', [])
             sev_str = ", ".join([str(x) for x in severities if x])
-            print(f"   • {s['symptom']}: reported as {sev_str}")
+            print(f"   - {s['symptom']}: reported as {sev_str}")
             print(f"     Mentioned {s['times_mentioned']}x, first: {format_date(s['first_mentioned'])}, last: {format_date(s['last_mentioned'])}")
     
     print("\n" + "=" * 70)
@@ -463,35 +463,35 @@ def print_narrative_inconsistencies(username: str):
     print("=" * 70)
     
     if analysis['total_flags'] == 0:
-        print("\n✅ No significant inconsistencies detected.")
+        print("\nNo significant inconsistencies detected.")
         print("=" * 70)
         return
     
-    print(f"\n⚠️ TOTAL FLAGS: {analysis['total_flags']}")
+    print(f"\n[!] TOTAL FLAGS: {analysis['total_flags']}")
     
     if analysis['diagnosis_inconsistencies']:
-        print(f"\n🏥 DIAGNOSIS INCONSISTENCIES ({len(analysis['diagnosis_inconsistencies'])})")
+        print(f"\nDIAGNOSIS INCONSISTENCIES ({len(analysis['diagnosis_inconsistencies'])})")
         for inc in analysis['diagnosis_inconsistencies']:
-            print(f"   🔴 {inc['condition']}: {inc['description']}")
+            print(f"   [!] {inc['condition']}: {inc['description']}")
     
     if analysis['treatment_inconsistencies']:
         high_sev = [t for t in analysis['treatment_inconsistencies'] if t['severity'] == 'high']
         low_sev = [t for t in analysis['treatment_inconsistencies'] if t['severity'] == 'low']
         
         if high_sev:
-            print(f"\n💊 TREATMENT CONFLICTS (HIGH SEVERITY)")
+            print(f"\nTREATMENT CONFLICTS (HIGH SEVERITY)")
             for inc in high_sev:
-                print(f"   🔴 {inc['treatment']}: {inc['description']}")
+                print(f"   [!] {inc['treatment']}: {inc['description']}")
         
         if low_sev:
-            print(f"\n💊 TREATMENT VARIATIONS (LOW SEVERITY)")
+            print(f"\nTREATMENT VARIATIONS (LOW SEVERITY)")
             for inc in low_sev[:5]:
-                print(f"   🟡 {inc['treatment']}: {inc['description']}")
+                print(f"   [~] {inc['treatment']}: {inc['description']}")
     
     if analysis['severity_inconsistencies']:
-        print(f"\n📊 SEVERITY INCONSISTENCIES ({len(analysis['severity_inconsistencies'])})")
+        print(f"\nSEVERITY INCONSISTENCIES ({len(analysis['severity_inconsistencies'])})")
         for inc in analysis['severity_inconsistencies'][:10]:
-            print(f"   🟡 {inc['symptom']}: {inc['description']}")
+            print(f"   [~] {inc['symptom']}: {inc['description']}")
     
     print("\n" + "=" * 70)
 
@@ -504,13 +504,13 @@ def refresh_user_data(username: str):
     
     profile = update_user_profile(username)
     if profile:
-        print(f"   ✓ User profile updated")
+        print(f"   User profile updated")
     
     timeline = update_diagnosis_timeline(username)
-    print(f"   ✓ Diagnosis timeline updated ({len(timeline)} entries)")
+    print(f"   Diagnosis timeline updated ({len(timeline)} entries)")
     
     consistency = update_symptom_consistency(username)
-    print(f"   ✓ Symptom consistency updated ({len(consistency)} symptoms)")
+    print(f"   Symptom consistency updated ({len(consistency)} symptoms)")
     
     return {'profile': profile, 'timeline': timeline, 'consistency': consistency}
 
@@ -521,7 +521,7 @@ def refresh_all_data():
     
     print("Refreshing all user profiles...")
     count = refresh_all_user_profiles()
-    print(f"✓ Updated {count} user profiles")
+    print(f"Updated {count} user profiles")
     return count
 
 

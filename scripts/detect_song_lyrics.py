@@ -50,7 +50,7 @@ def signal_handler(signum, frame):
         print("\n\nForce quitting...")
         sys.exit(1)
     shutdown_requested = True
-    print("\n\n⚠ Ctrl+C detected - finishing current tasks and stopping...")
+    print("\n\nCtrl+C detected - finishing current tasks and stopping...")
     print("  (Press Ctrl+C again to force quit)\n")
 
 from config import OLLAMA_URL, OLLAMA_MODEL
@@ -179,16 +179,16 @@ Examples: 0, 15, 50, 85, 100"""
             return ratio, True
         
         # Couldn't parse - log and return failure
-        print(f"  ⚠ Could not extract number from LLM response: '{answer[:50] if answer else '(empty)'}...'")
+        print(f"  Could not extract number from LLM response: '{answer[:50] if answer else '(empty)'}...'")
         if thinking:
             print(f"      Thinking excerpt: '{thinking[-100:]}'")
         return 0.0, False
             
     except requests.exceptions.Timeout:
-        print(f"  ✗ LLM timeout (model may be too slow)")
+        print(f"  LLM timeout (model may be too slow)")
         return 0.0, False
     except Exception as e:
-        print(f"  ✗ LLM error: {e}")
+        print(f"  LLM error: {e}")
         return 0.0, False
 
 
@@ -209,7 +209,7 @@ def detect_song_lyrics_heuristic(transcript_text: str, verbose: bool = False) ->
     
     if word_count < 10:
         if verbose:
-            print(f"    [Heuristic] Too short ({word_count} words) → assuming spoken (low confidence)")
+            print(f"    [Heuristic] Too short ({word_count} words) -> assuming spoken (low confidence)")
         return 0.1, 0.3  # Too short to tell, assume mostly spoken
     
     # Calculate a score based on multiple factors
@@ -343,7 +343,7 @@ def process_transcript(transcript: dict, model: str, ollama_url: str,
         result['method'] = 'heuristic_only'
         
         if verbose:
-            print(f"    [Result] Heuristic only → ratio={final_ratio:.0%}")
+            print(f"    [Result] Heuristic only -> ratio={final_ratio:.0%}")
         
         if not dry_run:
             update_transcript_song_lyrics_ratio(video_id, final_ratio)
@@ -365,7 +365,7 @@ def process_transcript(transcript: dict, model: str, ollama_url: str,
         result['llm_error'] = True
         
         if verbose:
-            print(f"    [Result] LLM failed, using heuristic → ratio={final_ratio:.0%}")
+            print(f"    [Result] LLM failed, using heuristic -> ratio={final_ratio:.0%}")
         
         if not dry_run:
             update_transcript_song_lyrics_ratio(video_id, final_ratio)
@@ -381,7 +381,7 @@ def process_transcript(transcript: dict, model: str, ollama_url: str,
     result['method'] = 'combined'
     
     if verbose:
-        print(f"    [Combine] Heuristic={heuristic_ratio:.0%}, LLM={llm_ratio:.0%} → Final={final_ratio:.0%}")
+        print(f"    [Combine] Heuristic={heuristic_ratio:.0%}, LLM={llm_ratio:.0%} -> Final={final_ratio:.0%}")
     
     if not dry_run:
         update_transcript_song_lyrics_ratio(video_id, final_ratio)
@@ -420,44 +420,44 @@ def main():
     
     # Force single worker in verbose mode to keep output readable
     if args.verbose and args.workers > 1:
-        print(f"⚠ Verbose mode: forcing --workers=1 for readable output")
+        print(f"Verbose mode: forcing --workers=1 for readable output")
         args.workers = 1
     
     # Show statistics
     if args.stats:
         stats = get_song_lyrics_stats()
-        print("\n📊 Song Lyrics Ratio Statistics")
+        print("\nSong Lyrics Ratio Statistics")
         print("=" * 45)
         print(f"Total transcripts:     {stats['total']}")
         print(f"Unchecked (no ratio):  {stats['unchecked']}")
         print(f"Checked (has ratio):   {stats.get('checked', 0)}")
         
         if stats.get('avg_ratio') is not None:
-            print(f"\n📈 Ratio Breakdown:")
+            print(f"\nRatio Breakdown:")
             print(f"  Average ratio:         {stats['avg_ratio']:.1%}")
             print(f"  Pure spoken (<20%):    {stats.get('pure_spoken', 0)}")
             print(f"  Mostly spoken (20-50%): {stats.get('mostly_spoken', 0)}")
             print(f"  Mixed (50-80%):        {stats.get('mixed', 0)}")
             print(f"  Mostly lyrics (>80%):  {stats.get('mostly_lyrics', 0)}")
             
-            print(f"\n💡 Filter tips:")
+            print(f"\nFilter tips:")
             print(f"  WHERE song_lyrics_ratio < 0.5  -- mostly spoken content")
             print(f"  WHERE song_lyrics_ratio < 0.8  -- include some mixed")
         return
     
     # Get transcripts needing check
-    print("🔍 Finding transcripts to check...")
+    print("Finding transcripts to check...")
     transcripts = get_transcripts_needing_song_check(limit=args.limit)
     
     if not transcripts:
-        print("✓ All transcripts have been checked!")
+        print("All transcripts have been checked!")
         stats = get_song_lyrics_stats()
         print(f"  Song lyrics: {stats['song_lyrics']}, Spoken content: {stats['spoken_content']}")
         return
     
     print(f"Found {len(transcripts)} transcripts to check")
     if args.dry_run:
-        print("⚠ DRY RUN - database will not be updated")
+        print("DRY RUN - database will not be updated")
     
     if args.heuristics_only:
         print("Mode: Heuristics only (no LLM)")
@@ -522,7 +522,7 @@ def main():
                     processed_count += 1
                     
                     if 'error' in result:
-                        print(f"[{i}/{len(transcripts)}] ✗ Video {result['video_id']}: {result['error']}")
+                        print(f"[{i}/{len(transcripts)}] FAILED Video {result['video_id']}: {result['error']}")
                         error_count += 1
                         continue
                     
@@ -536,32 +536,32 @@ def main():
                     
                     # Categorize by ratio for display
                     if ratio >= 0.8:
-                        symbol = "🎵"
+                        symbol = "[SONG]"
                         song_lyrics_count += 1
                         print(f"[{i}/{len(transcripts)}] {symbol} Video {result['video_id']}: {ratio:.0%} lyrics")
                     else:
-                        symbol = "💬"
+                        symbol = "[SPEAK]"
                         spoken_count += 1
                         # Only print every 10th for mostly-spoken content to reduce noise
                         if i % 10 == 0 or i == len(transcripts) or ratio >= 0.5:
                             print(f"[{i}/{len(transcripts)}] {symbol} Video {result['video_id']}: {ratio:.0%} lyrics")
                             
                 except Exception as e:
-                    print(f"[{i}/{len(transcripts)}] ✗ Error processing video {transcript['video_id']}: {e}")
+                    print(f"[{i}/{len(transcripts)}] ERROR processing video {transcript['video_id']}: {e}")
                     error_count += 1
                     
     except KeyboardInterrupt:
-        print("\n\n⚠ Interrupted by user")
+        print("\n\nInterrupted by user")
     
     if shutdown_requested or cancelled_count > 0:
-        print(f"\n⚠ Stopped early. Processed {processed_count}/{len(transcripts)}, cancelled {cancelled_count}")
+        print(f"\nStopped early. Processed {processed_count}/{len(transcripts)}, cancelled {cancelled_count}")
     
     elapsed = time.time() - start_time
     
     # Summary
     print()
     print("=" * 50)
-    print("📊 Detection Summary")
+    print("Detection Summary")
     print("=" * 50)
     total = len(transcripts)
     print(f"Total processed:      {total}")
@@ -578,7 +578,7 @@ def main():
         mixed = sum(1 for r in all_ratios if 0.5 <= r < 0.8)
         mostly_lyrics = sum(1 for r in all_ratios if r >= 0.8)
         
-        print(f"📈 Ratio Distribution:")
+        print(f"Ratio Distribution:")
         print(f"  Average ratio:        {avg_ratio:.0%}")
         print(f"  Pure spoken (<20%):   {pure_spoken}")
         print(f"  Mostly spoken (20-50%): {mostly_spoken}")
@@ -594,9 +594,9 @@ def main():
     print(f"Time elapsed:         {elapsed:.1f}s ({elapsed/total:.2f}s per transcript)")
     
     if args.dry_run:
-        print("\n⚠ DRY RUN - no database changes were made")
+        print("\nDRY RUN - no database changes were made")
     else:
-        print("\n✓ Database updated successfully")
+        print("\nDatabase updated successfully")
         
         # Show updated stats
         stats = get_song_lyrics_stats()

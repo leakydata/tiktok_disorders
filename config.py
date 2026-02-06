@@ -87,11 +87,11 @@ if __name__ == '__main__':
     # Test configuration
     try:
         validate_config()
-        print("✓ Configuration is valid")
+        print("Configuration is valid")
         print(f"  Database: {DATABASE_URL}")
         print(f"  Audio directory: {AUDIO_DIR}")
         print(f"  Transcript directory: {TRANSCRIPT_DIR}")
         print(f"  Visualization directory: {VISUALIZATION_DIR}")
         print(f"  Whisper model: {WHISPER_MODEL}")
     except ValueError as e:
-        print(f"✗ Configuration error:\n{e}")
+        print(f"Configuration error:\n{e}")

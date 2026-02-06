@@ -571,10 +571,10 @@ class AudioTranscriber:
         else:
             # Detailed CUDA detection
             if torch is None:
-                print("⚠ PyTorch not installed - using CPU")
+                print("PyTorch not installed - using CPU")
                 self.device = 'cpu'
             elif not torch.cuda.is_available():
-                print("⚠ CUDA not available - using CPU")
+                print("CUDA not available - using CPU")
                 print("  To enable GPU: rm -rf .venv && uv sync --group cuda")
                 self.device = 'cpu'
             else:
@@ -601,7 +601,7 @@ class AudioTranscriber:
         if self.device == 'cuda' and torch:
             gpu_name = torch.cuda.get_device_name(0)
             gpu_memory = torch.cuda.get_device_properties(0).total_memory / 1024**3
-            print(f"✓ Using GPU: {gpu_name} ({gpu_memory:.1f} GB)")
+            print(f"Using GPU: {gpu_name} ({gpu_memory:.1f} GB)")
 
         ensure_directories()
 
@@ -624,7 +624,7 @@ class AudioTranscriber:
         # Check if already transcribed
         existing = get_transcript(video_id)
         if existing:
-            print(f"✓ Transcript already exists for video {video_id}")
+            print(f"Transcript already exists for video {video_id}")
             text = existing.get('text', '')
             return {
                 'transcript_id': existing['id'],
@@ -731,7 +731,7 @@ class AudioTranscriber:
         with open(output_path, 'w', encoding='utf-8') as f:
             json.dump(transcript_data, f, indent=2, ensure_ascii=False)
 
-        print(f"✓ Transcript saved: {output_path}")
+        print(f"Transcript saved: {output_path}")
 
         # Store in database
         db_id = insert_transcript(
@@ -873,12 +873,12 @@ class AudioTranscriber:
                 result = self.transcribe(video_id, **kwargs)
                 results.append({'video_id': video_id, 'success': True, 'data': result})
             except Exception as e:
-                print(f"✗ Error transcribing video {video_id}: {e}")
+                print(f"Error transcribing video {video_id}: {e}")
                 results.append({'video_id': video_id, 'success': False, 'error': str(e)})
 
         # Summary
         success_count = sum(1 for r in results if r['success'])
-        print(f"\n✓ Successfully transcribed {success_count}/{len(video_ids)} videos")
+        print(f"\nSuccessfully transcribed {success_count}/{len(video_ids)} videos")
 
         return results
 
@@ -926,11 +926,11 @@ class AudioTranscriber:
                     'success': True
                 })
 
-                print(f"✓ Completed in {elapsed:.2f} seconds")
+                print(f"Completed in {elapsed:.2f} seconds")
                 print(f"  Text length: {len(result['text'])} characters")
 
             except Exception as e:
-                print(f"✗ Error: {e}")
+                print(f"Error: {e}")
                 results.append({
                     'model': model_size,
                     'success': False,
@@ -957,10 +957,10 @@ if __name__ == '__main__':
 
     # Check GPU
     if torch and torch.cuda.is_available():
-        print(f"✓ CUDA is available: {torch.cuda.get_device_name(0)}")
+        print(f"CUDA is available: {torch.cuda.get_device_name(0)}")
         print(f"  GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f} GB")
     else:
-        print("⚠ CUDA not available, will use CPU")
+        print("CUDA not available, will use CPU")
 
     # Interactive test
     video_id = input("\nEnter video ID to transcribe (or 'q' to quit): ").strip()
@@ -968,9 +968,9 @@ if __name__ == '__main__':
         try:
             transcriber = AudioTranscriber(model_size='large-v3')  # Use best model for RTX 4090
             result = transcriber.transcribe(int(video_id))
-            print(f"\n✓ Transcription complete!")
+            print(f"\nTranscription complete!")
             print(f"  Language: {result['language']}")
             print(f"  Word count: {result['word_count']}")
             print(f"\nFirst 500 characters:\n{result['text'][:500]}...")
         except Exception as e:
-            print(f"✗ Error: {e}")
+            print(f"Error: {e}")
