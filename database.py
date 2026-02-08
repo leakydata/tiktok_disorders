@@ -26,90 +26,314 @@ from config import DATABASE_URL
 # =============================================================================
 
 CONDITION_EXPECTED_SYMPTOMS = {
+
     'EDS': {
         'name': 'Ehlers-Danlos Syndrome',
         'core_symptoms': [
-            'joint hypermobility', 'joint instability', 'dislocations', 'subluxations',
-            'chronic pain', 'easy bruising', 'skin hyperextensibility', 'poor wound healing',
-            'soft velvety skin', 'joint pain', 'fatigue'
+            # Clinical terms
+            'generalized joint hypermobility',
+            'joint instability',
+            'recurrent joint dislocations',
+            'recurrent subluxations',
+            'chronic musculoskeletal pain',
+            'skin hyperextensibility',
+            'easy bruising',
+            'poor wound healing',
+            'soft or velvety skin',
+            # Colloquial terms (TikTok language)
+            'hypermobility',
+            'hypermobile',
+            'dislocations',
+            'subluxations',
+            'chronic pain',
+            'joint pain',
+            'fatigue',
+            'bruising'
         ],
         'common_symptoms': [
-            'chronic fatigue', 'headaches', 'TMJ dysfunction', 'scoliosis', 'flat feet',
-            'muscle weakness', 'clicking joints', 'sprains', 'hernias', 'prolapse',
-            'digestive issues', 'POTS symptoms', 'anxiety'
+            'chronic fatigue',
+            'exhaustion',
+            'scoliosis',
+            'flat feet',
+            'pes planus',
+            'recurrent sprains',
+            'sprains',
+            'hernias',
+            'pelvic organ prolapse',
+            'prolapse',
+            'stretch marks',
+            'unexplained striae',
+            'bilateral piezogenic papules of the heel',
+            'atrophic scarring',
+            'dental crowding',
+            'high or narrow palate',
+            'arachnodactyly',
+            'mitral valve prolapse',
+            'aortic root dilatation',
+            'digestive issues',
+            'POTS symptoms',
+            'anxiety'
         ],
-        'categories': ['musculoskeletal', 'dermatological', 'fatigue']
+        'categories': [
+            'connective_tissue_structural',
+            'musculoskeletal',
+            'dermatological',
+            'fatigue',
+            'vascular_bleeding',
+            'dental_tmj',
+            'cardiovascular'
+        ]
     },
+
     'MCAS': {
         'name': 'Mast Cell Activation Syndrome',
         'core_symptoms': [
-            'flushing', 'hives', 'itching', 'anaphylaxis', 'swelling',
-            'abdominal pain', 'diarrhea', 'nausea', 'food reactions',
-            'chemical sensitivity', 'medication sensitivity'
+            # Clinical terms
+            'episodic flushing',
+            'urticaria',
+            'pruritus',
+            'angioedema',
+            'anaphylaxis',
+            'abdominal pain',
+            'diarrhea',
+            'nausea',
+            # Colloquial terms (TikTok language)
+            'flushing',
+            'hives',
+            'itching',
+            'swelling',
+            'food reactions',
+            'chemical sensitivity',
+            'medication sensitivity',
+            'allergic reactions'
         ],
         'common_symptoms': [
-            'brain fog', 'fatigue', 'headaches', 'anxiety', 'rapid heart rate',
-            'low blood pressure', 'fainting', 'nasal congestion', 'wheezing',
-            'skin rashes', 'bone pain', 'bladder pain', 'interstitial cystitis'
+            'nasal congestion',
+            'nasal pruritus',
+            'wheezing',
+            'tachycardia',
+            'hypotension',
+            'syncope',
+            'headache',
+            'throat swelling',
+            'brain fog',
+            'fatigue',
+            'anxiety',
+            'rapid heart rate',
+            'fainting',
+            'skin rashes',
+            'rashes',
+            'bladder pain',
+            'bone pain'
         ],
-        'categories': ['allergic', 'gastrointestinal', 'dermatological', 'neurological']
+        'categories': [
+            'mast_cell_allergy_like',
+            'immune_inflammation',
+            'gastrointestinal',
+            'respiratory',
+            'cardiovascular',
+            'ent',
+            'neurological'
+        ]
     },
+
     'POTS': {
         'name': 'Postural Orthostatic Tachycardia Syndrome',
         'core_symptoms': [
-            'rapid heart rate on standing', 'dizziness', 'lightheadedness',
-            'fainting', 'near-fainting', 'palpitations', 'exercise intolerance',
-            'tachycardia', 'orthostatic intolerance'
+            # Clinical terms
+            'excessive heart rate increase on standing',
+            'orthostatic intolerance',
+            'lightheadedness',
+            'palpitations',
+            'presyncope',
+            # Colloquial terms (TikTok language)
+            'tachycardia',
+            'rapid heart rate',
+            'elevated heart rate',
+            'heart racing',
+            'dizziness',
+            'dizzy',
+            'fainting',
+            'near fainting',
+            'exercise intolerance'
         ],
         'common_symptoms': [
-            'fatigue', 'brain fog', 'headaches', 'nausea', 'tremors',
-            'shortness of breath', 'chest pain', 'cold extremities',
-            'blood pooling', 'blurred vision', 'weakness', 'sweating',
-            'anxiety', 'sleep problems', 'GI issues'
+            'fatigue',
+            'exhaustion',
+            'tremulousness',
+            'tremor',
+            'shaking',
+            'generalized weakness',
+            'weakness',
+            'blurred vision',
+            'nausea',
+            'cold extremities',
+            'cold hands',
+            'cold feet',
+            'sleep disturbance',
+            'migraine headaches',
+            'brain fog',
+            'blood pooling',
+            'sweating',
+            'adrenaline surges'
         ],
-        'categories': ['cardiovascular', 'autonomic', 'neurological', 'fatigue']
+        'categories': [
+            'autonomic',
+            'dysautonomia',
+            'cardiovascular',
+            'orthostatic_intolerance',
+            'fatigue',
+            'sleep',
+            'neurological'
+        ]
     },
+
     'FIBROMYALGIA': {
         'name': 'Fibromyalgia',
         'core_symptoms': [
-            'widespread pain', 'tender points', 'chronic pain', 'muscle pain',
-            'fatigue', 'sleep problems', 'cognitive difficulties', 'brain fog'
+            'widespread musculoskeletal pain',
+            'chronic pain',
+            'fatigue',
+            'non-restorative sleep',
+            'cognitive dysfunction'
         ],
         'common_symptoms': [
-            'headaches', 'IBS', 'anxiety', 'depression', 'TMJ pain',
-            'numbness', 'tingling', 'sensitivity to light', 'sensitivity to sound',
-            'morning stiffness', 'restless legs'
+            'headache',
+            'waking unrefreshed',
+            'lower abdominal pain or cramps',
+            'irritable bowel symptoms',
+            'morning stiffness',
+            'paresthesias',
+            'depression'
         ],
-        'categories': ['musculoskeletal', 'neurological', 'fatigue']
+        'categories': [
+            'fibromyalgia',
+            'musculoskeletal',
+            'pain_characterization',
+            'fatigue',
+            'sleep',
+            'cognitive',
+            'neurological',
+            'gastrointestinal',
+            'affective'
+        ]
     },
+
     'CFS': {
-        'name': 'Chronic Fatigue Syndrome / ME',
+        'name': 'Myalgic Encephalomyelitis / Chronic Fatigue Syndrome',
         'core_symptoms': [
-            'severe fatigue', 'post-exertional malaise', 'unrefreshing sleep',
-            'cognitive impairment', 'brain fog', 'orthostatic intolerance'
+            'substantial reduction in functional capacity',
+            'post-exertional malaise',
+            'unrefreshing sleep',
+            'cognitive impairment',
+            'orthostatic intolerance'
         ],
         'common_symptoms': [
-            'muscle pain', 'joint pain', 'headaches', 'sore throat',
-            'tender lymph nodes', 'sensitivity to light', 'sensitivity to sound',
-            'dizziness', 'nausea', 'palpitations'
+            'muscle pain',
+            'joint pain without swelling or redness',
+            'headaches of a new type, pattern, or severity',
+            'sore throat',
+            'tender lymph nodes',
+            'chills',
+            'night sweats',
+            'visual disturbances',
+            'sensitivity to light',
+            'sensitivity to sound',
+            'nausea',
+            'dizziness'
         ],
-        'categories': ['fatigue', 'neurological', 'autonomic']
+        'categories': [
+            'fatigue',
+            'functional_capacity',
+            'neurological',
+            'sleep',
+            'orthostatic_intolerance',
+            'sensory_overload',
+            'lymphatic',
+            'gastrointestinal'
+        ]
     },
+
     'CIRS': {
         'name': 'Chronic Inflammatory Response Syndrome',
         'core_symptoms': [
-            'fatigue', 'weakness', 'muscle aches', 'headaches', 'light sensitivity',
-            'memory problems', 'word finding difficulty', 'concentration problems',
-            'joint pain', 'morning stiffness', 'unusual skin sensations'
+            'chronic fatigue',
+            'cognitive impairment',
+            'headache',
+            'myalgia'
         ],
         'common_symptoms': [
-            'sinus congestion', 'cough', 'shortness of breath', 'abdominal pain',
-            'diarrhea', 'appetite changes', 'metallic taste', 'vertigo',
-            'static shocks', 'night sweats', 'mood swings', 'ice pick pain',
-            'tearing', 'disorientation', 'skin sensitivity', 'numbness', 'tingling'
+            'sinus congestion',
+            'cough',
+            'dyspnea',
+            'abdominal pain',
+            'diarrhea',
+            'light sensitivity'
         ],
-        'categories': ['neurological', 'musculoskeletal', 'respiratory', 'cognitive']
+        'categories': [
+            'immune_inflammation',
+            'fatigue',
+            'cognitive',
+            'respiratory',
+            'gastrointestinal'
+        ]
+    },
+
+    'GASTROPARESIS': {
+        'name': 'Gastroparesis',
+        'core_symptoms': [
+            'nausea',
+            'vomiting',
+            'early satiety',
+            'bloating',
+            'abdominal pain',
+            'feeling full',
+            'delayed gastric emptying'
+        ],
+        'common_symptoms': [
+            'heartburn',
+            'acid reflux',
+            'weight loss',
+            'malnutrition',
+            'blood sugar fluctuations',
+            'appetite loss',
+            'stomach pain',
+            'constipation',
+            'food sitting in stomach'
+        ],
+        'categories': [
+            'gastrointestinal'
+        ]
+    },
+
+    'SIBO': {
+        'name': 'Small Intestinal Bacterial Overgrowth',
+        'core_symptoms': [
+            'bloating',
+            'abdominal distension',
+            'diarrhea',
+            'constipation',
+            'abdominal pain',
+            'gas',
+            'flatulence',
+            'nausea'
+        ],
+        'common_symptoms': [
+            'fatigue',
+            'brain fog',
+            'weight loss',
+            'malnutrition',
+            'food intolerances',
+            'joint pain',
+            'skin issues',
+            'vitamin deficiencies',
+            'belching'
+        ],
+        'categories': [
+            'gastrointestinal'
+        ]
     }
+
 }
 
 
@@ -2304,20 +2528,22 @@ def get_user_profile(username: str) -> Dict[str, Any]:
         video_ids = [row['id'] for row in cur.fetchall()]
         profile['video_ids'] = video_ids
         
-        # All claimed diagnoses with first mention date
+        # All claimed diagnoses with first mention date (aggregated by condition_code only)
         cur.execute("""
             SELECT 
                 cd.condition_code,
-                cd.condition_name,
+                MODE() WITHIN GROUP (ORDER BY cd.condition_name) as condition_name,
                 COUNT(*) as mention_count,
                 AVG(cd.confidence) as avg_confidence,
                 BOOL_OR(cd.is_self_diagnosed) as ever_self_diagnosed,
+                BOOL_OR(NOT cd.is_self_diagnosed) as ever_professionally_diagnosed,
                 MIN(v.upload_date) as first_mentioned,
-                MAX(v.upload_date) as last_mentioned
+                MAX(v.upload_date) as last_mentioned,
+                COUNT(DISTINCT v.id) as video_count
             FROM claimed_diagnoses cd
             JOIN videos v ON cd.video_id = v.id
             WHERE LOWER(v.author) = LOWER(%s)
-            GROUP BY cd.condition_code, cd.condition_name
+            GROUP BY cd.condition_code
             ORDER BY first_mentioned
         """, (username,))
         profile['diagnoses'] = [dict(row) for row in cur.fetchall()]
@@ -2384,7 +2610,7 @@ def get_user_profile(username: str) -> Dict[str, Any]:
             WHERE LOWER(v.author) = LOWER(%s)
             GROUP BY t.treatment_type, t.treatment_name
             ORDER BY mention_count DESC
-            LIMIT 20
+            LIMIT 30
         """, (username,))
         profile['treatments'] = [dict(row) for row in cur.fetchall()]
         

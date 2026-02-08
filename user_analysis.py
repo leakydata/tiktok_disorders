@@ -56,7 +56,7 @@ def print_user_profile(username: str, verbose: bool = False):
     print("=" * 70)
     
     # Basic stats
-    print(f"\n📊 BASIC STATISTICS")
+    print(f"\nBASIC STATISTICS")
     print(f"   Videos analyzed: {profile['video_count']}")
     print(f"   Date range: {format_date(profile['first_video_date'])} to {format_date(profile['last_video_date'])}")
     if profile.get('follower_count'):
@@ -66,35 +66,44 @@ def print_user_profile(username: str, verbose: bool = False):
     
     # Diagnoses
     if profile.get('diagnoses'):
-        print(f"\n🏥 CLAIMED DIAGNOSES ({len(profile['diagnoses'])} unique)")
+        print(f"\nCLAIMED DIAGNOSES ({len(profile['diagnoses'])} unique)")
         for d in profile['diagnoses']:
-            self_diag = "🔴 self-diagnosed" if d.get('ever_self_diagnosed') else "🟢 professional"
-            print(f"   • {d['condition_code']}: {d['mention_count']}x mentions ({self_diag})")
-            print(f"     First mentioned: {format_date(d['first_mentioned'])}, Last: {format_date(d['last_mentioned'])}")
-            print(f"     Avg confidence: {d['avg_confidence']:.2f}")
+            # Determine diagnosis source
+            has_self = d.get('ever_self_diagnosed', False)
+            has_pro = d.get('ever_professionally_diagnosed', False)
+            if has_self and has_pro:
+                source = "[BOTH]"  # Claimed both self and professional at different times
+            elif has_self:
+                source = "[SELF]"
+            else:
+                source = "[PRO]"
+            
+            video_count = d.get('video_count', d.get('mention_count', 0))
+            print(f"   - {d['condition_code']}: {d['mention_count']}x mentions in {video_count} videos {source}")
+            print(f"     First: {format_date(d['first_mentioned'])} -> Last: {format_date(d['last_mentioned'])}")
     
     # Concordance
     if profile.get('concordance'):
-        print(f"\n📈 CONCORDANCE SCORES")
+        print(f"\nCONCORDANCE SCORES")
         for c in profile['concordance']:
             score = c['avg_concordance'] or 0
-            emoji = "🟢" if score >= 0.5 else "🟡" if score >= 0.3 else "🔴"
-            print(f"   {emoji} {c['condition_code']}: {score:.2f} avg concordance")
+            level = "[HIGH]" if score >= 0.5 else "[MED]" if score >= 0.3 else "[LOW]"
+            print(f"   {level} {c['condition_code']}: {score:.2f} avg concordance")
             print(f"      Core symptom score: {c.get('avg_core_score', 0):.2f}")
             print(f"      Range: {c.get('min_concordance', 0):.2f} - {c.get('max_concordance', 0):.2f}")
     
     # Top symptoms
     if profile.get('symptoms'):
-        print(f"\n🩺 TOP SYMPTOMS ({len(profile['symptoms'])} unique)")
-        for s in profile['symptoms'][:15]:
+        print(f"\nTOP SYMPTOMS ({len(profile['symptoms'])} unique)")
+        for s in profile['symptoms'][:50]:
             severities = s.get('severities_reported', [])
             sev_str = ", ".join([str(x) for x in severities if x]) if severities else "unspecified"
-            print(f"   • {s['symptom']} ({s['category']}): {s['mention_count']}x - {sev_str}")
+            print(f"   - {s['symptom']} ({s['category']}): {s['mention_count']}x - {sev_str}")
     
     # STRAIN indicators
     strain = profile.get('strain_indicators', {})
     if strain and strain.get('total_narratives', 0) > 0:
-        print(f"\n🔬 STRAIN INDICATORS (from {strain.get('total_narratives', 0)} videos)")
+        print(f"\nSTRAIN INDICATORS (from {strain.get('total_narratives', 0)} videos)")
         print(f"   Self-diagnosis mentions: {strain.get('self_diagnosis_mentions', 0)}")
         print(f"   Professional diagnosis mentions: {strain.get('professional_diagnosis_mentions', 0)}")
         print(f"   Doctor dismissal/gaslighting: {strain.get('doctor_dismissal_mentions', 0) + strain.get('medical_gaslighting_mentions', 0)}")
@@ -104,11 +113,11 @@ def print_user_profile(username: str, verbose: bool = False):
     
     # Treatments
     if profile.get('treatments'):
-        print(f"\n💊 TREATMENTS MENTIONED ({len(profile['treatments'])})")
-        for t in profile['treatments'][:10]:
+        print(f"\nTREATMENTS MENTIONED ({len(profile['treatments'])})")
+        for t in profile['treatments'][:30]:
             eff = t.get('reported_effectiveness', [])
             eff_str = ", ".join([str(x) for x in eff if x]) if eff else "unspecified"
-            print(f"   • {t['treatment_name']} ({t['treatment_type']}): {t['mention_count']}x - {eff_str}")
+            print(f"   - {t['treatment_name']} ({t['treatment_type']}): {t['mention_count']}x - {eff_str}")
     
     print("\n" + "=" * 70)
 
