@@ -50,6 +50,7 @@ The full research protocol, preregistration, and materials are available on OSF:
 - **Resumable Runs** - Progress tracking allows interrupted runs to be resumed
 - **Duplicate Detection** - Prevents downloading the same video twice
 - **Idempotent Processing** - Safe to re-run; skips already downloaded, transcribed, and extracted videos
+- **URL Progress Tracking** - Successful URLs moved to `urls_processed.txt`, failed to `urls_failed.txt`
 - **Song Lyrics Detection** - Automatically detects and skips song lyrics to avoid wasted extraction
 - **Granular Recovery** - Run individual pipeline stages to recover from failures
 - **Crash-Safe Discovery** - URLs saved incrementally to survive interruptions
@@ -247,9 +248,12 @@ uv run python pipeline.py run --resume 5
 Run individual stages when you need to recover from failures:
 
 ```bash
-# Download only
+# Download only (with automatic URL tracking)
 uv run python pipeline.py download --urls-file urls.txt
 uv run python pipeline.py download --url "https://tiktok.com/@user/video/123"
+
+# Re-process URLs that previously failed or were already processed
+uv run python pipeline.py download --urls-file urls.txt --force
 
 # Download all videos from a specific user (discovers + downloads)
 uv run python pipeline.py download --user chronicallychillandhot
@@ -276,6 +280,21 @@ uv run python pipeline.py extract --all --min-confidence 0.8 --provider ollama
 # Skip song lyrics (default: >= 20% ratio) and short transcripts (default: < 20 words)
 uv run python pipeline.py extract --all --max-song-ratio 0.3 --min-words 30
 ```
+
+**Download command options:**
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--url` | - | Single video URL to download |
+| `--urls-file` | - | Path to text file with URLs |
+| `--user` | - | TikTok username(s) to discover and download (can use multiple times) |
+| `--tags` | - | Tags to associate with videos |
+| `--max-videos` | all | Max videos per user |
+| `--force` | - | Re-process URLs even if in urls_processed.txt or urls_failed.txt |
+
+When using `--urls-file`, URLs are automatically tracked:
+- Successful downloads are moved to `urls_processed.txt`
+- Failed downloads are moved to `urls_failed.txt` with error message
+- Re-running skips already processed/failed URLs (use `--force` to override)
 
 **Extract command options:**
 | Option | Default | Description |
@@ -1107,42 +1126,47 @@ https://www.tiktok.com/@user2/video/789
 
 ## URL Progress Tracking
 
-The pipeline automatically tracks processed URLs:
+The pipeline automatically tracks processed and failed URLs:
 
 | File | Purpose |
 |------|---------|
 | `urls.txt` | Pending URLs to process |
 | `urls_processed.txt` | Successfully processed URLs (with timestamps) |
+| `urls_failed.txt` | Failed URLs (with timestamps and error messages) |
 
 ### How It Works
 
 1. **Pipeline processes URLs** from `urls.txt`
 2. **Successful URLs are moved** to `urls_processed.txt` with timestamp
-3. **Discovery checks both files** to avoid re-discovering processed videos
-4. **Failed URLs stay** in `urls.txt` for retry
+3. **Failed URLs are moved** to `urls_failed.txt` with timestamp and error message
+4. **Next run skips** URLs already in processed or failed files
+5. **Discovery checks all files** to avoid re-discovering processed videos
 
-After each run, you'll see a summary:
+After each download run, you'll see a summary:
 
 ```
-URL Processing Summary:
-  Total results: 100
-  Successful: 95
-  Moved to urls_processed.txt: 95
+Download Summary:
+  Total processed: 95/100
+  New downloads: 80
+  Already existed: 15
+  Failed: 5
+  Remaining in urls.txt: 0
 ```
 
 ### Features
 
-- **Automatic file creation**: `urls_processed.txt` is created automatically on first use
+- **Automatic file creation**: `urls_processed.txt` and `urls_failed.txt` are created automatically
 - **Smart URL matching**: URLs are normalized (trailing slashes, whitespace) for reliable matching
-- **Always records**: Even URLs not in `urls.txt` (e.g., from command line) are recorded as processed
-- **Timestamped entries**: Each processed URL includes when it was completed
+- **Immediate tracking**: URLs are moved as soon as each download completes (crash-safe)
+- **Error logging**: Failed URLs include the error message for debugging
+- **Skip already-tried**: Re-running skips URLs in processed/failed files automatically
 
 ### Benefits
 
-- **Track progress**: See how many URLs are pending vs completed
+- **Track progress**: See how many URLs are pending, completed, or failed
 - **Avoid duplicates**: Discovery won't re-add already processed videos
-- **Easy retry**: Failed URLs remain in `urls.txt` for next run
-- **Clean separation**: Know what's done vs what's pending
+- **Easy debugging**: Check `urls_failed.txt` to see why downloads failed
+- **Clean retry**: Use `--force` to re-process failed URLs after fixing issues
 
 ### Check Status
 
@@ -1150,8 +1174,22 @@ URL Processing Summary:
 # Quick stats
 uv run python url_manager.py
 
-# Or programmatically
-uv run python -c "from url_manager import get_stats; s = get_stats(); print(f'Pending: {s[\"pending_count\"]}, Processed: {s[\"processed_count\"]}')"
+# Output:
+# URL Statistics:
+#   Pending: 150
+#   Processed: 8500
+#   Failed: 23
+#   Total known: 8673
+```
+
+### Re-process Failed URLs
+
+```powershell
+# Re-try all URLs (ignore processed/failed files)
+uv run python pipeline.py download --urls-file urls.txt --force
+
+# Or manually move URLs from failed back to pending
+# (edit urls_failed.txt, move desired URLs to urls.txt)
 ```
 
 ### Disable URL Moving
@@ -1161,6 +1199,8 @@ If you prefer to keep all URLs in `urls.txt`:
 ```powershell
 uv run python pipeline.py run --urls-file urls.txt --no-move-processed
 ```
+
+Note: The `download` command always tracks URLs. The `--no-move-processed` flag is for the `run` command.
 
 ## License
 

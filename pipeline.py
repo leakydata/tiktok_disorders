@@ -406,13 +406,19 @@ def cmd_run(args):
 def cmd_download(args):
     """Handle the 'download' subcommand - download only."""
     from scripts.discover import discover_user_videos
+    from url_manager import (
+        mark_urls_as_processed, mark_url_as_failed,
+        filter_unprocessed_urls, get_stats
+    )
     
     downloader = VideoDownloader()
     urls = []
+    urls_file = None  # Track which file we're reading from for URL management
 
     if args.url:
         urls = [args.url]
     elif args.urls_file:
+        urls_file = args.urls_file
         urls = read_urls_file(args.urls_file)
     elif getattr(args, 'user', None):
         # Discover videos for user(s) first
@@ -432,21 +438,58 @@ def cmd_download(args):
         print("Error: Provide --url, --urls-file, or --user")
         return 1
 
+    original_count = len(urls)
+    
+    # Filter out already processed or failed URLs (unless --force is used)
+    skip_processed = not getattr(args, 'force', False)
+    if skip_processed and urls_file:
+        urls = filter_unprocessed_urls(urls)
+        skipped = original_count - len(urls)
+        if skipped > 0:
+            print(f"Skipping {skipped} already processed/failed URLs")
+            stats = get_stats()
+            print(f"  (processed: {stats['processed_count']}, failed: {stats['failed_count']})")
+    
+    if not urls:
+        print("No new URLs to download!")
+        return 0
+
     print(f"\nDownloading {len(urls)} video(s)...")
     success_count = 0
+    already_existed_count = 0
+    
     for i, url in enumerate(urls, 1):
         print(f"\n[{i}/{len(urls)}] {url}")
         try:
             result = downloader.download_audio(url, args.tags)
             if result.get('already_existed'):
                 print(f"  Already exists: {result['audio_path']}")
+                already_existed_count += 1
             else:
                 print(f"  Downloaded: {result['audio_path']}")
             success_count += 1
+            
+            # Move URL to processed file immediately after success
+            if urls_file:
+                mark_urls_as_processed([url], pending_file=urls_file)
+                
         except Exception as e:
+            error_msg = str(e)[:100]  # Truncate long errors
             print(f"  Error: {e}")
+            
+            # Move URL to failed file
+            if urls_file:
+                mark_url_as_failed(url, error=error_msg, pending_file=urls_file)
 
-    print(f"\nDownloaded {success_count}/{len(urls)} videos")
+    print(f"\nDownload Summary:")
+    print(f"  Total processed: {success_count}/{len(urls)}")
+    print(f"  New downloads: {success_count - already_existed_count}")
+    print(f"  Already existed: {already_existed_count}")
+    print(f"  Failed: {len(urls) - success_count}")
+    if urls_file:
+        stats = get_stats()
+        print(f"  Remaining in {urls_file}: {stats['pending_count']}")
+    
     return 0
 
 
@@ -885,6 +928,8 @@ Examples:
     dl_parser.add_argument('--user', action='append', help='TikTok username(s) to discover and download')
     dl_parser.add_argument('--tags', nargs='+', default=[], help='Tags for videos')
     dl_parser.add_argument('--max-videos', type=int, help='Max videos per user (default: all)')
+    dl_parser.add_argument('--force', action='store_true',
+                          help='Process URLs even if already in urls_processed.txt or urls_failed.txt')
     dl_parser.set_defaults(func=cmd_download)
 
     # --- transcribe subcommand ---
