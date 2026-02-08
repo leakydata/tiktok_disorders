@@ -31,7 +31,8 @@ class ResearchPipeline:
                  extractor_provider: Optional[str] = None,
                  extractor_model: Optional[str] = None,
                  ollama_url: Optional[str] = None,
-                 max_song_ratio: float = 0.6):
+                 max_song_ratio: float = 0.6,
+                 enable_thinking: bool = False):
         """
         Initialize the pipeline.
 
@@ -40,6 +41,7 @@ class ResearchPipeline:
             min_confidence: Minimum confidence score for symptoms
             parallel_extraction: Enable parallel symptom extraction
             max_song_ratio: Skip videos with song_lyrics_ratio >= this (default 0.6)
+            enable_thinking: For Qwen3 models, use /think mode (slower, more thorough)
         """
         self.downloader = VideoDownloader()
         self.transcriber = AudioTranscriber(model_size=whisper_model)
@@ -49,6 +51,7 @@ class ResearchPipeline:
             model=extractor_model,
             ollama_url=ollama_url,
             max_song_ratio=max_song_ratio,
+            enable_thinking=enable_thinking,
         )
         self.analyzer = SymptomAnalyzer(min_confidence=min_confidence)
 
@@ -366,7 +369,8 @@ def cmd_run(args):
         parallel_extraction=not args.no_parallel,
         extractor_provider=args.provider,
         extractor_model=args.model,
-        max_song_ratio=args.max_song_ratio
+        max_song_ratio=args.max_song_ratio,
+        enable_thinking=getattr(args, 'thinking', False)
     )
     pipeline._no_move_processed = args.no_move_processed
 
@@ -482,7 +486,8 @@ def cmd_extract(args):
         max_workers=10 if not args.no_parallel else 1,
         provider=args.provider,
         model=args.model,
-        max_song_ratio=args.max_song_ratio
+        max_song_ratio=args.max_song_ratio,
+        enable_thinking=getattr(args, 'thinking', False)
     )
 
     min_words = getattr(args, 'min_words', 20)
@@ -805,6 +810,8 @@ Examples:
     run_parser.add_argument('--no-parallel', action='store_true', help='Disable parallel extraction')
     run_parser.add_argument('--max-song-ratio', type=float, default=0.2,
                            help='Skip videos with song_lyrics_ratio >= this (default: 0.2)')
+    run_parser.add_argument('--thinking', action='store_true',
+                           help='Enable Qwen3 thinking mode (/think) for deeper reasoning (slower)')
     run_parser.set_defaults(func=cmd_run)
 
     # --- download subcommand ---
@@ -835,6 +842,8 @@ Examples:
                            help='Skip transcripts with fewer than this many words (default: 20)')
     ex_parser.add_argument('--force', action='store_true',
                            help='Re-extract even if already processed (clears previous extraction)')
+    ex_parser.add_argument('--thinking', action='store_true',
+                           help='Enable Qwen3 thinking mode (/think) for deeper reasoning (slower)')
     ex_parser.set_defaults(func=cmd_extract)
 
     # --- analyze subcommand ---

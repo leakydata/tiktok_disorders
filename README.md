@@ -276,6 +276,7 @@ uv run python pipeline.py extract --all --max-song-ratio 0.3 --min-words 30
 | `--provider` | ollama | LLM provider (ollama or anthropic) |
 | `--model` | gpt-oss:20b | LLM model name |
 | `--force` | - | Re-extract all videos (clears previous extraction status) |
+| `--thinking` | - | Enable Qwen3 `/think` mode for deeper reasoning (slower) |
 
 **Note:** Videos are marked as "extracted" after processing (even if zero symptoms found). This prevents re-processing the same videos. Use `--force` to re-extract.
 
@@ -349,6 +350,8 @@ uv run python user_analysis.py refresh --username @user   # Specific user
 - Compares reported symptoms to expected symptoms for each claimed condition
 - Core symptom score (did they report the defining symptoms?)
 - Flags users with consistently low concordance (< 0.3)
+- **Fuzzy matching with 100+ synonym mappings** for EDS/MCAS/POTS terminology (e.g., "food sensitivity" ↔ "food reactions", "heart racing" ↔ "tachycardia")
+- **Condition name filtering** - Excludes when the LLM extracts diagnosis names as "symptoms" (e.g., "mast cell activation" won't count as a symptom for MCAS)
 
 **Narrative Inconsistencies Detection:**
 - Diagnosis source conflicts (same condition claimed as both self-diagnosed AND professionally diagnosed)
@@ -767,10 +770,42 @@ uv run python pipeline.py extract --all --min-words 50
 
 | Model | Size | Context | Quality | Notes |
 |-------|------|---------|---------|-------|
-| `gpt-oss:20b` | 20B | 128k | **Best** | OpenAI open-weight, optimized for reasoning |
+| `qwen3:32b` | 32B | 32k (131k YaRN) | **Best** | Excels at colloquial TikTok language, /think mode |
+| `gpt-oss:20b` | 20B | 128k | Excellent | OpenAI open-weight, optimized for reasoning |
+| `alibayram/medgemma:27b` | 27B | 8-32k | Excellent | Medical terminology embedded, 87.7% MedQA |
 | `gpt-oss:120b` | 120B | 128k | Excellent | Requires 80GB VRAM |
 | `qwen2.5:20b` | 20B | 32k | Very Good | Good alternative |
 | `llama3:70b` | 70B | 8k | Very Good | Large but shorter context |
+
+### Qwen3 Thinking Mode
+
+Qwen3 models support `/think` and `/no_think` modes for controlling reasoning depth:
+
+```bash
+# Fast extraction (default) - uses /no_think for efficient JSON output
+uv run python pipeline.py extract --all --model qwen3:32b
+
+# Deep reasoning mode - uses /think for complex/ambiguous cases (slower)
+uv run python pipeline.py extract --all --model qwen3:32b --thinking
+```
+
+| Mode | Flag | Best For |
+|------|------|----------|
+| `/no_think` | (default) | Fast extraction, straightforward transcripts |
+| `/think` | `--thinking` | Complex cases, ambiguous language, validation |
+
+**Why Qwen3?** It excels at understanding informal TikTok language like "my body just does weird stuff" or "it's like my joints are made of rubber bands" that clinical models might miss.
+
+### MedGemma for Medical Validation
+
+For medical terminology normalization or validation passes:
+
+```bash
+# Use MedGemma for extraction
+uv run python pipeline.py extract --all --model alibayram/medgemma:27b
+```
+
+MedGemma has 87.7% MedQA accuracy with medical terms deeply embedded from training on clinical data.
 
 ### Optimizations for High-Capability Models
 
@@ -781,7 +816,7 @@ When using `gpt-oss:20b` or similar high-capability models, the pipeline automat
 3. **Parallel Processing** - 20 concurrent extractions (optimized for multi-core workstations)
 4. **Extended Timeouts** - 5-minute timeout for thorough reasoning
 
-The pipeline detects `gpt-oss`, `qwen2.5:20b`, `llama3:70b`, and `mixtral` as high-capability models.
+The pipeline detects `qwen3`, `gpt-oss`, `qwen2.5:20b`, `llama3:70b`, `mixtral`, and `medgemma` as high-capability models.
 
 ## Output
 

@@ -307,8 +307,12 @@ SYMPTOM_CATEGORIES = {
 class SymptomExtractor:
     """Extracts symptoms from transcripts using Claude or Ollama.
     
-    Optimized for high-performance models like gpt-oss:20b with 128k context
+    Optimized for high-performance models like Qwen3, gpt-oss:20b with 128k context
     and workstation hardware (40 cores, 393GB RAM, RTX 4090).
+    
+    Qwen3 models support /think and /no_think modes:
+    - /no_think: Fast extraction without chain-of-thought (default for extraction)
+    - /think: Deep reasoning for complex cases or validation
     """
 
     def __init__(
@@ -320,6 +324,7 @@ class SymptomExtractor:
         ollama_url: Optional[str] = None,
         use_combined_extraction: bool = True,  # Single prompt for all extractions
         max_song_ratio: float = 0.2,  # Skip videos with song_lyrics_ratio >= this
+        enable_thinking: bool = False,  # Use /think mode for Qwen3 (slower but more thorough)
     ):
         """
         Initialize the symptom extractor.
@@ -328,10 +333,12 @@ class SymptomExtractor:
             api_key: Anthropic API key (defaults to config.ANTHROPIC_API_KEY)
             max_workers: Maximum parallel API calls (default 20 for workstation)
             use_combined_extraction: Use single prompt for all extractions (faster)
-            max_song_ratio: Skip videos with song_lyrics_ratio >= this (default 0.6)
+            max_song_ratio: Skip videos with song_lyrics_ratio >= this (default 0.2)
+            enable_thinking: For Qwen3 models, use /think mode (slower, more thorough)
         """
         self.provider = (provider or EXTRACTOR_PROVIDER).lower()
         self.max_song_ratio = max_song_ratio
+        self.enable_thinking = enable_thinking
         if self.provider not in {"anthropic", "ollama"}:
             raise ValueError("provider must be 'anthropic' or 'ollama'")
 
@@ -348,10 +355,26 @@ class SymptomExtractor:
             self.client = None
         self.max_workers = max_workers
         
-        # Detect if using a high-capability model (gpt-oss, etc.)
-        self.is_high_capability = any(x in self.model.lower() for x in ['gpt-oss', 'qwen2.5:20b', 'llama3:70b', 'mixtral'])
-        if self.is_high_capability:
+        # Detect model capabilities
+        model_lower = self.model.lower()
+        self.is_qwen3 = 'qwen3' in model_lower or 'qwen-3' in model_lower
+        self.is_medgemma = 'medgemma' in model_lower
+        self.is_high_capability = any(x in model_lower for x in [
+            'gpt-oss', 'qwen2.5:20b', 'qwen3', 'llama3:70b', 'mixtral', 'medgemma'
+        ])
+        
+        if self.is_qwen3:
+            thinking_mode = "/think (deep reasoning)" if enable_thinking else "/no_think (fast extraction)"
+            print(f"[OK] Qwen3 model detected: {self.model}")
+            print(f"    Mode: {thinking_mode}")
+            print(f"    Qwen3 excels at colloquial TikTok language understanding")
+        elif self.is_medgemma:
+            print(f"[OK] MedGemma model detected: {self.model}")
+            print(f"    Medical terminology deeply embedded from training")
+        elif self.is_high_capability:
             print(f"[OK] High-capability model detected: {self.model}")
+        
+        if self.use_combined_extraction:
             print(f"    Using combined extraction for efficiency")
 
     def _build_extraction_prompt(self, transcript: str) -> str:
@@ -1294,7 +1317,17 @@ Return ONLY the JSON object, no additional text."""
             'success': symptom_result.get('success', False) and diagnosis_result.get('success', False)
         }
 
-    def _call_model(self, prompt: str) -> str:
+    def _call_model(self, prompt: str, force_thinking: bool = False) -> str:
+        """
+        Call the LLM with the given prompt.
+        
+        Args:
+            prompt: The extraction prompt
+            force_thinking: Override default and use /think mode (for complex cases)
+        
+        Returns:
+            Model response text
+        """
         if self.provider == "anthropic":
             response = self.client.messages.create(
                 model=self.model,
@@ -1307,18 +1340,43 @@ Return ONLY the JSON object, no additional text."""
             )
             return response.content[0].text.strip()
 
-        # Longer timeout for large models like gpt-oss:20b with complex prompts
-        timeout = 300 if self.is_high_capability else 120
+        # For Qwen3 models, prepend thinking mode control
+        final_prompt = prompt
+        if self.is_qwen3:
+            if force_thinking or self.enable_thinking:
+                # Use thinking mode for complex/ambiguous cases
+                final_prompt = f"/think\n\n{prompt}"
+            else:
+                # Use non-thinking mode for fast extraction (default)
+                # This avoids verbose chain-of-thought in JSON output
+                final_prompt = f"/no_think\n\n{prompt}"
+        
+        # Longer timeout for large models - thinking mode needs more time
+        if self.is_qwen3 and (force_thinking or self.enable_thinking):
+            timeout = 600  # 10 min for thinking mode
+        elif self.is_high_capability:
+            timeout = 300
+        else:
+            timeout = 120
+        
+        # Adjust context/predict based on model
+        if self.is_qwen3:
+            # Qwen3 32b has 32K native, 131K with YaRN
+            num_ctx = 65536
+            num_predict = 16384 if (force_thinking or self.enable_thinking) else 12288
+        else:
+            num_ctx = 65536
+            num_predict = 12288
         
         response = requests.post(
             f"{self.ollama_url}/api/chat",
             json={
                 "model": self.model,
-                "messages": [{"role": "user", "content": prompt}],
+                "messages": [{"role": "user", "content": final_prompt}],
                 "stream": False,
                 "options": {
-                    "num_ctx": 65536,  # 64K context (model supports 128K)
-                    "num_predict": 12288,  # 12K tokens for detailed extraction responses
+                    "num_ctx": num_ctx,
+                    "num_predict": num_predict,
                 }
             },
             timeout=timeout,
