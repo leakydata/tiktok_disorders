@@ -80,9 +80,9 @@ def report_diagnoses() -> Dict[str, Any]:
 
         # Diagnosis type distribution
         cur.execute("""
-            SELECT condition_name, COUNT(*) as count
+            SELECT condition_code, COUNT(*) as count
             FROM claimed_diagnoses
-            GROUP BY condition_name
+            GROUP BY condition_code
             ORDER BY count DESC
         """)
         by_type = [dict(r) for r in cur.fetchall()]

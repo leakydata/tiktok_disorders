@@ -3,7 +3,6 @@ Symptom extraction module using Claude or Ollama.
 Analyzes transcripts to identify and categorize symptoms with confidence scores.
 Optimized for high-throughput parallel processing.
 """
-import anthropic
 import requests
 from typing import Dict, Any, List, Optional
 import json
@@ -413,11 +412,12 @@ class SymptomExtractor:
 
         # Set up model and API key based on provider
         if self.provider == "anthropic":
+            import anthropic as _anthropic
             self.api_key = api_key or ANTHROPIC_API_KEY
             self.model = model or ANTHROPIC_MODEL
             if not self.api_key:
                 raise ValueError("ANTHROPIC_API_KEY is required for Anthropic")
-            self.client = anthropic.Anthropic(api_key=self.api_key)
+            self.client = _anthropic.Anthropic(api_key=self.api_key)
         elif self.provider == "deepseek":
             self.api_key = api_key or DEEPSEEK_API_KEY
             self.model = model or DEEPSEEK_MODEL
@@ -1017,6 +1017,234 @@ Return ONLY the JSON object, no additional text."""
                 'error': str(e)
             }
 
+    def _get_combined_system_prompt(self) -> str:
+        """Return the static system prompt for combined extraction.
+
+        This is separated so it can be passed as `system` to Anthropic's API,
+        enabling prompt caching (the static instructions are cached after the
+        first call, saving ~75% on instruction tokens for every subsequent call).
+        """
+        categories_str = "\n".join([f"- {cat}: {desc}" for cat, desc in SYMPTOM_CATEGORIES.items()])
+        condition_codes = (
+            "EDS, MCAS, POTS, DYSAUTONOMIA, IST, ME_CFS, FIBROMYALGIA, CHIARI, CCI_AAI, "
+            "TETHERED_CORD, GASTROPARESIS, SIBO, CIRS, LONG_COVID, AUTOIMMUNE, SFN, "
+            "ENDOMETRIOSIS, INTERSTITIAL_CYSTITIS, or OTHER"
+        )
+        return f"""You are a medical research assistant analyzing TikTok content about chronic illnesses for the STRAIN research framework.
+
+IMPORTANT FIRST CHECK: Before extracting any data, determine if this transcript is primarily SONG LYRICS rather than spoken content.
+- TikTok videos often play songs in the background instead of the creator speaking
+- Song lyrics typically have repetitive patterns, rhyming structures, and emotional/poetic language
+- If this is primarily song lyrics (>70% of the content), set "is_song_lyrics": true and skip all other extractions
+
+If is_song_lyrics is true, return ONLY: {{"is_song_lyrics": true, "symptoms": [], "diagnoses": [], "treatments": [], "narrative": {{}}}}
+Otherwise, proceed with full extraction below.
+
+Analyze the transcript and extract ALL of the following in a single JSON response:
+
+## 1. SYMPTOMS
+For each symptom mentioned, provide:
+- symptom: Brief description
+- category: One of these categories:
+{categories_str}
+- confidence: 0.0-1.0 (1.0 = explicitly stated personal experience)
+- severity: "mild", "moderate", "severe", or "unspecified"
+- temporal_pattern: "acute", "chronic", "intermittent", "progressive", or "unspecified"
+- body_location: Specific body part if mentioned
+- triggers: Array of triggers if mentioned
+- is_personal_experience: true/false
+- context: Relevant quote
+
+## 2. DIAGNOSES
+Medical conditions the speaker claims FOR THEMSELVES (not discussing generally):
+- condition_code: One of: {condition_codes}
+- condition_name: Full name as speaker calls it
+- confidence: 0.0-1.0 (1.0 = explicitly states "I have X")
+- diagnosis_status: "confirmed", "self_diagnosed", "suspected", "clinical", "genetic", "seeking", "lost", or "unclear"
+- eds_subtype: If EDS, specify "hEDS", "vEDS", "cEDS", "clEDS", "kEDS", "HSD", or null
+- diagnosis_date_mentioned: Year/date if mentioned
+- diagnosing_specialty: Who diagnosed (geneticist, rheumatologist, cardiologist, PCP, allergist, self, null)
+- sentiment: "validated", "frustrated", "relieved", "questioning", or "neutral"
+- mentioned_with: Array of other condition codes mentioned together (for comorbidity tracking)
+- context: Quote where they claim this diagnosis
+
+## 3. TREATMENTS
+Medications, supplements, therapies mentioned:
+- treatment_type: "medication", "supplement", "therapy", "lifestyle", "procedure", "device", "other"
+- treatment_name: Name of treatment
+- dosage: If mentioned
+- effectiveness: "very_helpful", "somewhat_helpful", "not_helpful", "made_worse", "unspecified"
+- side_effects: Array
+- target_condition: What it's for
+- context: Quote
+- confidence: 0.0-1.0
+
+## 4. NARRATIVE ELEMENTS (for STRAIN framework analysis)
+- content_type: "personal_story", "educational", "advice_giving", "awareness_advocacy", "product_promotion", "vent_rant", "other"
+- mentions_self_diagnosis: true/false/null
+- mentions_professional_diagnosis: true/false/null
+- mentions_negative_testing: true/false/null (tests came back normal)
+- mentions_doctor_dismissal: true/false/null (doctors didn't believe them)
+- mentions_medical_gaslighting: true/false/null
+- mentions_long_diagnostic_journey: true/false/null
+- mentions_multiple_doctors: true/false/null
+- years_to_diagnosis_mentioned: number or null
+- mentions_stress_triggers: true/false/null
+- mentions_symptom_flares: true/false/null
+- mentions_symptom_migration: true/false/null (symptoms moving between systems)
+- mentions_online_community: true/false/null
+- mentions_other_creators: true/false/null
+- mentions_learning_from_tiktok: true/false/null
+- cites_medical_sources: true/false/null
+- claims_healthcare_background: true/false/null
+- uses_condition_as_identity: true/false/null
+- diagnostic_journey_quotes: Array of max 3 quotes
+- stress_trigger_quotes: Array of max 3 quotes
+
+Return a single JSON object with this structure:
+{{
+  "is_song_lyrics": false,
+  "symptoms": [...],
+  "diagnoses": [...],
+  "treatments": [...],
+  "narrative": {{...}}
+}}
+
+NOTE: If the transcript is primarily song lyrics, return:
+{{"is_song_lyrics": true, "symptoms": [], "diagnoses": [], "treatments": [], "narrative": {{}}}}
+
+Return ONLY the JSON object, no additional text."""
+
+    def _process_combined_response(self, data: dict, video_id: int,
+                                    transcript_data: dict, min_conf: float) -> Dict[str, Any]:
+        """Process parsed JSON from a combined extraction response into the database.
+
+        Extracted from extract_all_combined so it can be reused by batch processing.
+        Returns the same result dict as extract_all_combined.
+        """
+        # Check if LLM detected song lyrics during extraction
+        if data.get('is_song_lyrics') is True:
+            update_transcript_song_lyrics_ratio(video_id, 0.9)
+            print(f"Video {video_id} detected as song lyrics during extraction - skipping")
+            return {
+                'video_id': video_id,
+                'success': True,
+                'skipped': True,
+                'reason': 'song_lyrics',
+                'song_lyrics_ratio': 0.9
+            }
+
+        # If ratio wasn't set by detect_song_lyrics.py, mark as spoken content (low ratio)
+        if transcript_data.get('song_lyrics_ratio') is None:
+            update_transcript_song_lyrics_ratio(video_id, 0.1)
+
+        # Process symptoms
+        symptoms_saved = 0
+        for symptom_data in data.get('symptoms', []):
+            confidence = symptom_data.get('confidence', 0.0)
+            if confidence >= min_conf:
+                insert_symptom(
+                    video_id=video_id,
+                    category=symptom_data.get('category', 'other'),
+                    symptom=symptom_data['symptom'],
+                    confidence=confidence,
+                    context=symptom_data.get('context'),
+                    severity=symptom_data.get('severity', 'unspecified'),
+                    temporal_pattern=symptom_data.get('temporal_pattern', 'unspecified'),
+                    body_location=symptom_data.get('body_location'),
+                    triggers=symptom_data.get('triggers', []),
+                    is_personal_experience=symptom_data.get('is_personal_experience', True),
+                    extractor_model=self.model,
+                    extractor_provider=self.provider
+                )
+                symptoms_saved += 1
+
+        # Process diagnoses
+        diagnosis_ids = []
+        for diag in data.get('diagnoses', []):
+            if diag.get('confidence', 0) >= 0.5:
+                status = diag.get('diagnosis_status', 'unclear')
+                is_self_diag = True if status == 'self_diagnosed' else (
+                    False if status in ['confirmed', 'clinical', 'genetic'] else None
+                )
+                diag_id = insert_claimed_diagnosis(
+                    video_id=video_id,
+                    condition_code=diag.get('condition_code', 'OTHER'),
+                    condition_name=diag.get('condition_name', 'Unknown'),
+                    confidence=diag.get('confidence', 0.5),
+                    context=diag.get('context'),
+                    diagnosis_status=status,
+                    is_self_diagnosed=diag.get('is_self_diagnosed', is_self_diag),
+                    diagnosis_date_mentioned=diag.get('diagnosis_date_mentioned'),
+                    eds_subtype=diag.get('eds_subtype'),
+                    diagnosing_specialty=diag.get('diagnosing_specialty'),
+                    sentiment=diag.get('sentiment'),
+                    mentioned_with=diag.get('mentioned_with', []),
+                    extractor_model=self.model,
+                    extractor_provider=self.provider
+                )
+                diagnosis_ids.append(diag_id)
+
+        # Process treatments
+        treatments_saved = 0
+        for treatment in data.get('treatments', []):
+            if treatment.get('confidence', 0) >= 0.4:
+                insert_treatment(
+                    video_id=video_id,
+                    treatment_type=treatment.get('treatment_type', 'other'),
+                    treatment_name=treatment.get('treatment_name', 'Unknown'),
+                    dosage=treatment.get('dosage'),
+                    frequency=treatment.get('frequency'),
+                    effectiveness=treatment.get('effectiveness', 'unspecified'),
+                    side_effects=treatment.get('side_effects', []),
+                    is_current=treatment.get('is_current'),
+                    target_condition=treatment.get('target_condition'),
+                    target_symptoms=treatment.get('target_symptoms', []),
+                    context=treatment.get('context'),
+                    confidence=treatment.get('confidence', 0.5),
+                    extractor_model=self.model,
+                    extractor_provider=self.provider
+                )
+                treatments_saved += 1
+
+        # Process narrative elements
+        narrative = data.get('narrative', {})
+        narrative['extractor_model'] = self.model
+        narrative['extractor_provider'] = self.provider
+        narrative['confidence'] = 0.7
+        insert_narrative_elements(video_id, narrative)
+
+        # Calculate concordance
+        concordance_results = []
+        for diag_id in diagnosis_ids:
+            try:
+                concordance = calculate_symptom_concordance(video_id, diag_id, self.model)
+                concordance_results.append(concordance)
+            except Exception:
+                pass
+
+        # Update comorbidity pairs
+        if len(diagnosis_ids) >= 2:
+            try:
+                update_comorbidity_pairs(video_id)
+            except Exception:
+                pass
+
+        mark_transcript_extracted(video_id)
+
+        print(f"[OK] Extracted: {symptoms_saved} symptoms, {len(diagnosis_ids)} diagnoses, "
+              f"{treatments_saved} treatments, narrative:{narrative.get('content_type', 'unknown')}")
+
+        return {
+            'video_id': video_id,
+            'success': True,
+            'symptoms': {'symptoms_saved': symptoms_saved},
+            'diagnoses': {'diagnoses_saved': len(diagnosis_ids)},
+            'treatments': {'treatments_saved': treatments_saved},
+            'narrative': narrative,
+            'concordance': concordance_results,
+        }
+
     def extract_all_combined(self, video_id: int, min_confidence: Optional[float] = None,
                               force: bool = False) -> Dict[str, Any]:
         """
@@ -1396,37 +1624,47 @@ Return ONLY the JSON object, no additional text."""
             'success': symptom_result.get('success', False) and diagnosis_result.get('success', False)
         }
 
-    def _call_model(self, prompt: str, force_thinking: bool = False) -> str:
+    def _call_model(self, prompt: str, system: Optional[str] = None,
+                    force_thinking: bool = False) -> str:
         """
         Call the LLM with the given prompt.
-        
+
         Args:
-            prompt: The extraction prompt
+            prompt: The user-facing extraction prompt (just the transcript for combined mode)
+            system: Optional static system prompt. For Anthropic, passed as the `system`
+                    parameter with cache_control so it is cached across calls (saves ~75%
+                    on instruction tokens). For DeepSeek, passed as the system role message.
             force_thinking: Override default and use /think mode (for complex cases)
-        
+
         Returns:
             Model response text
         """
         if self.provider == "anthropic":
-            response = self.client.messages.create(
-                model=self.model,
-                max_tokens=4096,
-                temperature=0.0,
-                messages=[{
-                    "role": "user",
-                    "content": prompt
-                }]
-            )
+            kwargs: Dict[str, Any] = {
+                "model": self.model,
+                "max_tokens": 4096,
+                "temperature": 0.0,
+                "messages": [{"role": "user", "content": prompt}],
+            }
+            if system:
+                # cache_control marks this block for prompt caching.
+                # Requires ≥1024 tokens for Sonnet, ≥2048 for Haiku.
+                kwargs["system"] = [
+                    {"type": "text", "text": system,
+                     "cache_control": {"type": "ephemeral"}}
+                ]
+            response = self.client.messages.create(**kwargs)
             return response.content[0].text.strip()
-        
+
         if self.provider == "deepseek":
-            # DeepSeek uses OpenAI-compatible API
+            # DeepSeek uses OpenAI-compatible API; system goes as a system role message
+            messages = []
+            if system:
+                messages.append({"role": "system", "content": system})
+            messages.append({"role": "user", "content": prompt})
             response = self.client.chat.completions.create(
                 model=self.model,
-                messages=[{
-                    "role": "user",
-                    "content": prompt
-                }],
+                messages=messages,
                 max_tokens=8192,
                 temperature=0.0,
             )
