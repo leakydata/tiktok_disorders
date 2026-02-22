@@ -1304,229 +1304,140 @@ Return ONLY the JSON object, no additional text."""
 
         print(f"Extracting all data from video {video_id} ({len(transcript_text)} chars) [COMBINED MODE]...")
 
-        categories_str = "\n".join([f"- {cat}: {desc}" for cat, desc in SYMPTOM_CATEGORIES.items()])
-
-        prompt = f"""You are a medical research assistant analyzing TikTok content about chronic illnesses for the STRAIN research framework.
-
-IMPORTANT FIRST CHECK: Before extracting any data, determine if this transcript is primarily SONG LYRICS rather than spoken content.
-- TikTok videos often play songs in the background instead of the creator speaking
-- Song lyrics typically have repetitive patterns, rhyming structures, and emotional/poetic language
-- If this is primarily song lyrics (>70% of the content), set "is_song_lyrics": true and skip all other extractions
-
-If is_song_lyrics is true, return ONLY: {{"is_song_lyrics": true, "symptoms": [], "diagnoses": [], "treatments": [], "narrative": {{}}}}
-Otherwise, proceed with full extraction below.
-
-Analyze this transcript and extract ALL of the following in a single JSON response:
-
-## 1. SYMPTOMS
-For each symptom mentioned, provide:
-- symptom: Brief description
-- category: One of: {', '.join(SYMPTOM_CATEGORIES.keys())}
-- confidence: 0.0-1.0 (1.0 = explicitly stated personal experience)
-- severity: "mild", "moderate", "severe", or "unspecified"
-- temporal_pattern: "acute", "chronic", "intermittent", "progressive", or "unspecified"
-- body_location: Specific body part if mentioned
-- triggers: Array of triggers if mentioned
-- is_personal_experience: true/false
-- context: Relevant quote
-
-## 2. DIAGNOSES
-Medical conditions the speaker claims FOR THEMSELVES (not discussing generally):
-- condition_code: One of: EDS, MCAS, POTS, DYSAUTONOMIA, IST, ME_CFS, FIBROMYALGIA, CHIARI, CCI_AAI, TETHERED_CORD, GASTROPARESIS, SIBO, CIRS, LONG_COVID, AUTOIMMUNE, SFN, ENDOMETRIOSIS, INTERSTITIAL_CYSTITIS, or OTHER
-- condition_name: Full name as speaker calls it
-- confidence: 0.0-1.0 (1.0 = explicitly states "I have X")
-- diagnosis_status: "confirmed", "self_diagnosed", "suspected", "clinical", "genetic", "seeking", "lost", or "unclear"
-- eds_subtype: If EDS, specify "hEDS", "vEDS", "cEDS", "clEDS", "kEDS", "HSD", or null
-- diagnosis_date_mentioned: Year/date if mentioned
-- diagnosing_specialty: Who diagnosed (geneticist, rheumatologist, cardiologist, PCP, allergist, self, null)
-- sentiment: "validated", "frustrated", "relieved", "questioning", or "neutral"
-- mentioned_with: Array of other condition codes mentioned together (for comorbidity tracking)
-- context: Quote where they claim this diagnosis
-
-## 3. TREATMENTS
-Medications, supplements, therapies mentioned:
-- treatment_type: "medication", "supplement", "therapy", "lifestyle", "procedure", "device", "other"
-- treatment_name: Name of treatment
-- dosage: If mentioned
-- effectiveness: "very_helpful", "somewhat_helpful", "not_helpful", "made_worse", "unspecified"
-- side_effects: Array
-- target_condition: What it's for
-- context: Quote
-- confidence: 0.0-1.0
-
-## 4. NARRATIVE ELEMENTS (for STRAIN framework analysis)
-- content_type: "personal_story", "educational", "advice_giving", "awareness_advocacy", "product_promotion", "vent_rant", "other"
-- mentions_self_diagnosis: true/false/null
-- mentions_professional_diagnosis: true/false/null
-- mentions_negative_testing: true/false/null (tests came back normal)
-- mentions_doctor_dismissal: true/false/null (doctors didn't believe them)
-- mentions_medical_gaslighting: true/false/null
-- mentions_long_diagnostic_journey: true/false/null
-- mentions_multiple_doctors: true/false/null
-- years_to_diagnosis_mentioned: number or null
-- mentions_stress_triggers: true/false/null
-- mentions_symptom_flares: true/false/null
-- mentions_symptom_migration: true/false/null (symptoms moving between systems)
-- mentions_online_community: true/false/null
-- mentions_other_creators: true/false/null
-- mentions_learning_from_tiktok: true/false/null
-- cites_medical_sources: true/false/null
-- claims_healthcare_background: true/false/null
-- uses_condition_as_identity: true/false/null
-- diagnostic_journey_quotes: Array of max 3 quotes
-- stress_trigger_quotes: Array of max 3 quotes
-
-Return a single JSON object with this structure:
-{{
-  "is_song_lyrics": false,
-  "symptoms": [...],
-  "diagnoses": [...],
-  "treatments": [...],
-  "narrative": {{...}}
-}}
-
-NOTE: If the transcript is primarily song lyrics, return:
-{{"is_song_lyrics": true, "symptoms": [], "diagnoses": [], "treatments": [], "narrative": {{}}}}
-
-TRANSCRIPT:
-{transcript_text}
-
-Return ONLY the JSON object, no additional text."""
+        system_prompt = self._get_combined_system_prompt()
+        user_prompt = f"TRANSCRIPT:\n{transcript_text}"
 
         try:
-            response_text = self._call_model(prompt)
-
-            # Extract JSON
+            response_text = self._call_model(user_prompt, system=system_prompt)
             data = _parse_json_safely(response_text)
-
-            # Check if LLM detected song lyrics during extraction
-            if data.get('is_song_lyrics') is True:
-                # Set high ratio (0.9 = 90% lyrics)
-                update_transcript_song_lyrics_ratio(video_id, 0.9)
-                print(f"Video {video_id} detected as song lyrics during extraction - skipping")
-                return {
-                    'video_id': video_id,
-                    'success': True,
-                    'skipped': True,
-                    'reason': 'song_lyrics',
-                    'song_lyrics_ratio': 0.9
-                }
-            
-            # If ratio wasn't set by detect_song_lyrics.py, mark as spoken content (low ratio)
-            if transcript_data.get('song_lyrics_ratio') is None:
-                update_transcript_song_lyrics_ratio(video_id, 0.1)
-
-            # Process symptoms
-            symptoms_saved = 0
-            for symptom_data in data.get('symptoms', []):
-                confidence = symptom_data.get('confidence', 0.0)
-                if confidence >= min_conf:
-                    insert_symptom(
-                        video_id=video_id,
-                        category=symptom_data.get('category', 'other'),
-                        symptom=symptom_data['symptom'],
-                        confidence=confidence,
-                        context=symptom_data.get('context'),
-                        severity=symptom_data.get('severity', 'unspecified'),
-                        temporal_pattern=symptom_data.get('temporal_pattern', 'unspecified'),
-                        body_location=symptom_data.get('body_location'),
-                        triggers=symptom_data.get('triggers', []),
-                        is_personal_experience=symptom_data.get('is_personal_experience', True),
-                        extractor_model=self.model,
-                        extractor_provider=self.provider
-                    )
-                    symptoms_saved += 1
-
-            # Process diagnoses
-            diagnosis_ids = []
-            for diag in data.get('diagnoses', []):
-                if diag.get('confidence', 0) >= 0.5:
-                    # Map diagnosis_status to is_self_diagnosed for backward compatibility
-                    status = diag.get('diagnosis_status', 'unclear')
-                    is_self_diag = True if status == 'self_diagnosed' else (False if status in ['confirmed', 'clinical', 'genetic'] else None)
-                    
-                    diag_id = insert_claimed_diagnosis(
-                        video_id=video_id,
-                        condition_code=diag.get('condition_code', 'OTHER'),
-                        condition_name=diag.get('condition_name', 'Unknown'),
-                        confidence=diag.get('confidence', 0.5),
-                        context=diag.get('context'),
-                        diagnosis_status=status,
-                        is_self_diagnosed=diag.get('is_self_diagnosed', is_self_diag),
-                        diagnosis_date_mentioned=diag.get('diagnosis_date_mentioned'),
-                        eds_subtype=diag.get('eds_subtype'),
-                        diagnosing_specialty=diag.get('diagnosing_specialty'),
-                        sentiment=diag.get('sentiment'),
-                        mentioned_with=diag.get('mentioned_with', []),
-                        extractor_model=self.model,
-                        extractor_provider=self.provider
-                    )
-                    diagnosis_ids.append(diag_id)
-
-            # Process treatments
-            treatments_saved = 0
-            for treatment in data.get('treatments', []):
-                if treatment.get('confidence', 0) >= 0.4:
-                    insert_treatment(
-                        video_id=video_id,
-                        treatment_type=treatment.get('treatment_type', 'other'),
-                        treatment_name=treatment.get('treatment_name', 'Unknown'),
-                        dosage=treatment.get('dosage'),
-                        frequency=treatment.get('frequency'),
-                        effectiveness=treatment.get('effectiveness', 'unspecified'),
-                        side_effects=treatment.get('side_effects', []),
-                        is_current=treatment.get('is_current'),
-                        target_condition=treatment.get('target_condition'),
-                        target_symptoms=treatment.get('target_symptoms', []),
-                        context=treatment.get('context'),
-                        confidence=treatment.get('confidence', 0.5),
-                        extractor_model=self.model,
-                        extractor_provider=self.provider
-                    )
-                    treatments_saved += 1
-
-            # Process narrative elements
-            narrative = data.get('narrative', {})
-            narrative['extractor_model'] = self.model
-            narrative['extractor_provider'] = self.provider
-            narrative['confidence'] = 0.7
-            insert_narrative_elements(video_id, narrative)
-
-            # Calculate concordance
-            concordance_results = []
-            for diag_id in diagnosis_ids:
-                try:
-                    concordance = calculate_symptom_concordance(video_id, diag_id, self.model)
-                    concordance_results.append(concordance)
-                except Exception as e:
-                    pass
-
-            # Update comorbidity pairs
-            if len(diagnosis_ids) >= 2:
-                try:
-                    update_comorbidity_pairs(video_id)
-                except Exception:
-                    pass
-
-            # Mark transcript as extracted (prevents re-processing even if zero symptoms)
-            mark_transcript_extracted(video_id)
-
-            print(f"[OK] Extracted: {symptoms_saved} symptoms, {len(diagnosis_ids)} diagnoses, "
-                  f"{treatments_saved} treatments, narrative:{narrative.get('content_type', 'unknown')}")
-
-            return {
-                'video_id': video_id,
-                'symptoms': {'symptoms_saved': symptoms_saved, 'success': True},
-                'diagnoses': {'diagnoses_saved': len(diagnosis_ids), 'diagnosis_ids': diagnosis_ids, 'success': True},
-                'treatments': {'treatments_saved': treatments_saved, 'success': True},
-                'narrative': {'content_type': narrative.get('content_type'), 'success': True},
-                'concordance': concordance_results,
-                'success': True
-            }
+            return self._process_combined_response(data, video_id, transcript_data, min_conf)
 
         except Exception as e:
             print(f"[ERROR] Combined extraction failed: {e}")
             return {'video_id': video_id, 'success': False, 'error': str(e)}
+
+    def submit_anthropic_batch(self, video_ids: List[int],
+                               batch_size: int = 10_000) -> List[str]:
+        """Submit video IDs to the Anthropic Message Batches API (50% cost reduction).
+
+        Batches are processed asynchronously — call process_anthropic_batch() with the
+        returned batch IDs once they complete (usually within minutes, up to 24 hours).
+
+        Args:
+            video_ids: List of video database IDs to extract from
+            batch_size: Max requests per batch (Anthropic limit is 10,000)
+
+        Returns:
+            List of batch IDs (one per chunk of batch_size)
+        """
+        if self.provider != "anthropic":
+            raise ValueError("Batch API is only available for the Anthropic provider")
+
+        import anthropic as _anthropic
+
+        system_prompt = self._get_combined_system_prompt()
+        requests_list = []
+        skipped = 0
+
+        print(f"Building batch requests for {len(video_ids)} videos...")
+        for video_id in video_ids:
+            transcript_data = get_transcript(video_id)
+            if not transcript_data or not transcript_data.get('text'):
+                skipped += 1
+                continue
+            transcript_text = transcript_data['text']
+            if len(transcript_text.split()) < 20:
+                skipped += 1
+                continue
+            song_ratio = transcript_data.get('song_lyrics_ratio')
+            if song_ratio is not None and song_ratio >= self.max_song_ratio:
+                skipped += 1
+                continue
+
+            requests_list.append({
+                "custom_id": f"video-{video_id}",
+                "params": {
+                    "model": self.model,
+                    "max_tokens": 4096,
+                    "temperature": 0.0,
+                    "system": [
+                        {"type": "text", "text": system_prompt,
+                         "cache_control": {"type": "ephemeral"}}
+                    ],
+                    "messages": [
+                        {"role": "user", "content": f"TRANSCRIPT:\n{transcript_text}"}
+                    ],
+                }
+            })
+
+        print(f"  {len(requests_list)} requests queued, {skipped} skipped")
+
+        batch_ids = []
+        for i in range(0, len(requests_list), batch_size):
+            chunk = requests_list[i:i + batch_size]
+            batch = self.client.messages.batches.create(requests=chunk)
+            batch_ids.append(batch.id)
+            print(f"  Submitted batch {len(batch_ids)}: {batch.id} "
+                  f"({len(chunk)} requests, status={batch.processing_status})")
+
+        print(f"Total: {len(requests_list)} requests across {len(batch_ids)} batch(es). "
+              f"Run process_anthropic_batch() to poll and store results.")
+        return batch_ids
+
+    def process_anthropic_batch(self, batch_id: str,
+                                 min_confidence: Optional[float] = None,
+                                 poll_interval: int = 60) -> Dict[str, Any]:
+        """Poll an Anthropic batch until complete, then store all results.
+
+        Args:
+            batch_id: Batch ID returned by submit_anthropic_batch()
+            min_confidence: Minimum confidence threshold for symptoms
+            poll_interval: Seconds between status polls
+
+        Returns:
+            Summary dict with processed/failed/skipped counts
+        """
+        if self.provider != "anthropic":
+            raise ValueError("Batch API is only available for the Anthropic provider")
+
+        import time
+
+        min_conf = min_confidence if min_confidence is not None else MIN_CONFIDENCE_SCORE
+
+        print(f"Polling batch {batch_id}...")
+        while True:
+            batch = self.client.messages.batches.retrieve(batch_id)
+            counts = batch.request_counts
+            print(f"  {batch.processing_status} | "
+                  f"succeeded={counts.succeeded} processing={counts.processing} "
+                  f"errored={counts.errored}")
+            if batch.processing_status == "ended":
+                break
+            time.sleep(poll_interval)
+
+        processed = failed = skipped = 0
+        for result in self.client.messages.batches.results(batch_id):
+            if result.result.type != "succeeded":
+                print(f"  {result.custom_id}: {result.result.type}")
+                failed += 1
+                continue
+
+            video_id = int(result.custom_id.split('-', 1)[1])
+            response_text = result.result.message.content[0].text
+
+            try:
+                data = _parse_json_safely(response_text)
+                transcript_data = get_transcript(video_id) or {}
+                self._process_combined_response(data, video_id, transcript_data, min_conf)
+                processed += 1
+            except Exception as e:
+                print(f"  video {video_id}: processing error — {e}")
+                failed += 1
+
+        print(f"\nBatch {batch_id} complete: "
+              f"{processed} processed, {failed} failed, {skipped} skipped")
+        return {'batch_id': batch_id, 'processed': processed,
+                'failed': failed, 'skipped': skipped}
 
     def extract_all(self, video_id: int, min_confidence: Optional[float] = None,
                     force: bool = False) -> Dict[str, Any]:

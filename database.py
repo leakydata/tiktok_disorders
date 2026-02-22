@@ -1260,19 +1260,89 @@ def _normalize_value(value: Any, mapping: Dict, default: Any) -> Any:
 
 
 # =============================================================================
+# Symptom category normalization
+# =============================================================================
+
+# Canonical set — must stay in sync with SYMPTOM_CATEGORIES keys in extractor.py
+VALID_SYMPTOM_CATEGORIES: frozenset = frozenset({
+    'musculoskeletal', 'craniocervical', 'cardiovascular', 'orthostatic_intolerance',
+    'autonomic', 'gastrointestinal', 'mast_cell_allergy_like', 'dermatological',
+    'neurological', 'cognitive', 'affective', 'fatigue', 'sleep', 'respiratory',
+    'vestibular', 'ocular', 'ent', 'pain_characterization', 'connective_tissue_structural',
+    'vascular_bleeding', 'immune_inflammation', 'metabolic', 'endocrine_metabolic',
+    'gynecologic', 'urological', 'dental_tmj', 'proprioception_coordination',
+    'sensory_overload', 'thermoregulation', 'flare_patterns', 'functional_capacity',
+    'medication_reactions', 'somatic_functional', 'diagnostic_journey',
+    'comorbidity_connections', 'community_identity', 'other',
+})
+
+# Rogue/hallucinated category names the LLM sometimes emits → canonical mapping
+CATEGORY_REMAP: Dict[str, str] = {
+    'dysautonomia':         'autonomic',
+    'autoimmune':           'immune_inflammation',
+    'endocrine':            'metabolic',
+    'hormonal':             'metabolic',
+    'hematological':        'vascular_bleeding',
+    'lymphatic':            'immune_inflammation',
+    'lymphatic_immune':     'immune_inflammation',
+    'infectious':           'immune_inflammation',
+    'treatments_devices':   'other',
+    'symptom_migration':    'other',
+    'lifestyle_behavior':   'other',
+    'lifestyle_management': 'other',
+    'progressive':          'other',   # temporal_pattern mistakenly used as category
+    'long_covid':           'other',
+    'fibromyalgia':         'pain_characterization',
+    'post_exertional_malaise': 'fatigue',
+    'craniofacial':         'craniocervical',
+    'cranio-cervical':      'craniocervical',
+    'hepatic':              'gastrointestinal',
+}
+
+
+def _normalize_category(category: str) -> str:
+    """Normalize a symptom category to a valid VALID_SYMPTOM_CATEGORIES value."""
+    if not category:
+        return 'other'
+    cat = category.lower().strip()
+    if cat in VALID_SYMPTOM_CATEGORIES:
+        return cat
+    return CATEGORY_REMAP.get(cat, 'other')
+
+
+# =============================================================================
 # Symptom Operations
 # =============================================================================
 
 def insert_symptom(video_id: int, category: str, symptom: str,
                   confidence: float, context: Optional[str] = None,
                   **kwargs) -> int:
-    """Insert a symptom record with enhanced tracking."""
-    # Normalize values to valid database constraints
+    """Insert a symptom record with enhanced tracking.
+
+    Normalizes symptom text (lowercase+strip), category, severity, and
+    temporal_pattern at write time so queries never need manual cleanup.
+    Skips exact duplicates (same video_id + symptom text) and returns the
+    existing row ID instead of inserting a second copy.
+    """
+    # Normalize text fields at insert time — eliminates the need for periodic
+    # UPDATE symptoms SET symptom = lower(symptom) cleanup queries
+    symptom = symptom.lower().strip() if symptom else 'unknown'
+    category = _normalize_category(category)
     severity = _normalize_value(kwargs.get('severity'), SEVERITY_MAP, 'unspecified')
     temporal_pattern = _normalize_value(kwargs.get('temporal_pattern'), TEMPORAL_PATTERN_MAP, 'unspecified')
-    
+
     with get_connection() as conn:
         cur = conn.cursor()
+        # Dedup: if this exact symptom was already extracted for this video, return
+        # the existing ID rather than creating a duplicate row
+        cur.execute(
+            "SELECT id FROM symptoms WHERE video_id = %s AND symptom = %s",
+            (video_id, symptom)
+        )
+        existing = cur.fetchone()
+        if existing:
+            return existing[0]
+
         cur.execute("""
             INSERT INTO symptoms (
                 video_id, category, symptom, confidence, context,
@@ -1307,19 +1377,37 @@ def get_symptoms_by_video(video_id: int) -> List[Dict[str, Any]]:
 def insert_claimed_diagnosis(video_id: int, condition_code: str, condition_name: str,
                             confidence: float, context: Optional[str] = None,
                             **kwargs) -> int:
-    """Insert a claimed diagnosis record with enhanced fields."""
+    """Insert a claimed diagnosis record with enhanced fields.
+
+    Trims condition_name whitespace at write time and skips exact duplicates
+    (same video_id + condition_code + condition_name, case-insensitive).
+    """
+    # Normalize text fields
+    condition_name = condition_name.strip() if condition_name else 'Unknown'
+    condition_code = condition_code.upper() if condition_code else 'OTHER'
+
     # Normalize values to valid database constraints
     diagnosis_status = _normalize_value(kwargs.get('diagnosis_status'), DIAGNOSIS_STATUS_MAP, 'unclear')
     eds_subtype = _normalize_value(kwargs.get('eds_subtype'), EDS_SUBTYPE_MAP, None)
     sentiment = _normalize_value(kwargs.get('sentiment'), SENTIMENT_MAP, 'neutral')
-    
+
     # Map is_self_diagnosed to diagnosis_status for backward compatibility
     is_self_diagnosed = kwargs.get('is_self_diagnosed')
     if kwargs.get('diagnosis_status') is None and is_self_diagnosed is not None:
         diagnosis_status = 'self_diagnosed' if is_self_diagnosed else 'confirmed'
-    
+
     with get_connection() as conn:
         cur = conn.cursor()
+        # Dedup: skip if same condition already recorded for this video
+        cur.execute(
+            "SELECT id FROM claimed_diagnoses "
+            "WHERE video_id = %s AND condition_code = %s AND lower(condition_name) = lower(%s)",
+            (video_id, condition_code, condition_name)
+        )
+        existing = cur.fetchone()
+        if existing:
+            return existing[0]
+
         cur.execute("""
             INSERT INTO claimed_diagnoses (
                 video_id, condition_code, condition_name, confidence, context,
@@ -1330,7 +1418,7 @@ def insert_claimed_diagnosis(video_id: int, condition_code: str, condition_name:
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id
         """, (
-            video_id, condition_code.upper(), condition_name, confidence, context,
+            video_id, condition_code, condition_name, confidence, context,
             diagnosis_status,
             is_self_diagnosed,
             kwargs.get('diagnosis_date_mentioned'),
@@ -2080,8 +2168,21 @@ def insert_treatment(video_id: int, treatment_type: str, treatment_name: str,
     elif normalized_effectiveness not in VALID_EFFECTIVENESS:
         normalized_effectiveness = 'unspecified'
     
+    # Normalize treatment_name at insert time — eliminates the need for periodic
+    # UPDATE treatments SET treatment_name = lower(treatment_name) cleanup queries
+    treatment_name = treatment_name.lower().strip() if treatment_name else 'unknown'
+
     with get_connection() as conn:
         cur = conn.cursor()
+        # Dedup: skip if same treatment already recorded for this video
+        cur.execute(
+            "SELECT id FROM treatments WHERE video_id = %s AND treatment_name = %s",
+            (video_id, treatment_name)
+        )
+        existing = cur.fetchone()
+        if existing:
+            return existing[0]
+
         cur.execute("""
             INSERT INTO treatments (
                 video_id, treatment_type, treatment_name, dosage, frequency,

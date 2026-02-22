@@ -569,6 +569,13 @@ def cmd_extract(args):
         enable_thinking=getattr(args, 'thinking', False)
     )
 
+    # --- Anthropic Batch API: retrieve results from a previous batch submission ---
+    if getattr(args, 'batch_id', None):
+        poll_interval = getattr(args, 'poll_interval', 60)
+        for bid in args.batch_id:
+            extractor.process_anthropic_batch(bid, poll_interval=poll_interval)
+        return 0
+
     min_words = getattr(args, 'min_words', 20)
     force = getattr(args, 'force', False)
     
@@ -677,6 +684,17 @@ def cmd_extract(args):
     else:
         print("Error: Provide --video-id, --user, or --all")
         return 1
+
+    # --- Anthropic Batch API: submit all video_ids as a batch and exit ---
+    if getattr(args, 'batch', False):
+        batch_ids = extractor.submit_anthropic_batch(video_ids)
+        print("\nBatch IDs (save these!):")
+        for bid in batch_ids:
+            print(f"  {bid}")
+        print("\nTo retrieve results when ready:")
+        ids_str = ' '.join(f'--batch-id {bid}' for bid in batch_ids)
+        print(f"  python pipeline.py extract {ids_str}")
+        return 0
 
     total_symptoms = 0
     success_count = 0
@@ -957,6 +975,14 @@ Examples:
                            help='Re-extract even if already processed (clears previous extraction)')
     ex_parser.add_argument('--thinking', action='store_true',
                            help='Enable Qwen3 thinking mode (/think) for deeper reasoning (slower)')
+    ex_parser.add_argument('--batch', action='store_true',
+                           help='Submit to Anthropic Batch API (50%% discount, async). '
+                                'Prints batch IDs then exits — use --batch-id to retrieve results.')
+    ex_parser.add_argument('--batch-id', action='append', metavar='BATCH_ID',
+                           help='Poll and process a previously submitted Anthropic batch. '
+                                'Can be specified multiple times for multiple batches.')
+    ex_parser.add_argument('--poll-interval', type=int, default=60,
+                           help='Seconds between batch status polls (default: 60)')
     ex_parser.set_defaults(func=cmd_extract)
 
     # --- analyze subcommand ---
