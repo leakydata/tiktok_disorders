@@ -9,16 +9,19 @@ points, so they run anywhere from under a second to 17s. Short segments are
 padded outward and long ones trimmed inward to land in a musically usable
 range.
 
-ONLY run this for creators who have given direct permission for reuse. A
-TikTok "allow duets" toggle is not consent to offline redistribution -- those
-clips belong in TikTok's native Duet/Stitch flow instead, which enforces the
-setting automatically.
+Permissions are enforced per video, not per creator. With no --creators-file
+or --creator, the allowed set is read from videos.duet_enabled /
+stitch_enabled / download_enabled as recorded by check_permissions.py, and
+anything unchecked stops the run. --require-download additionally excludes
+videos whose creator disabled downloads while still allowing duet/stitch.
 
 Usage:
-    python scripts/make_clips.py --csv data/lyrics/editlist_final.csv \\
-        --creators-file permitted.txt --out-dir data/clips
-    python scripts/make_clips.py --csv ... --creator chronically.roxii \\
-        --min-len 1.5 --max-len 4.0
+    # per-video permissions from the database (run check_permissions.py first)
+    python scripts/make_clips.py --csv data/lyrics/editlist_full.csv \\
+        --min-similarity 0.70 --out-dir data/clips
+
+    # or an explicit allowlist, e.g. a creator who gave direct permission
+    python scripts/make_clips.py --csv ... --creator chronically.roxii
 """
 import sys
 import csv
@@ -144,6 +147,11 @@ def main():
     p.add_argument('--tail', type=float, default=0.20,
                    help='Seconds taken after the segment end (default 0.20)')
     p.add_argument('--min-similarity', type=float, default=0.0)
+    p.add_argument('--also-allow', metavar='FILE',
+                   help='File of handles separately confirmed, one per line. '
+                        'Overrides unreadable or missing permissions.')
+    p.add_argument('--also-allow-handle', action='append', metavar='HANDLE',
+                   help='Handle separately confirmed (repeatable)')
     p.add_argument('--require-download', action='store_true',
                    help='Also require the creator to have left downloads '
                         'enabled, not just duet/stitch')
@@ -178,13 +186,29 @@ def main():
                   f"permissions. Run first:")
             print(f"  uv run scripts/check_permissions.py check --from-csv {args.csv}")
             return 1
+        # Creators separately confirmed by the user. Needed because some pages
+        # return no video data at all (statusCode 10204 -- author private,
+        # suspended or region-locked). That is unreadable, not denied, so it
+        # must not be treated as a permission decision either way.
+        also = load_permitted(args.also_allow) or set()
+        if args.also_allow_handle:
+            also |= {h.lower().lstrip('@') for h in args.also_allow_handle}
+
         rows, excluded = [], []
         for r in all_rows:
             p = perms.get(r['url'], {})
+            handle = (r.get('creator') or '').lower().lstrip('@')
             reuse = bool(p.get('duet') or p.get('stitch'))
             dl = bool(p.get('download'))
+            unreadable = p.get('duet') is None and p.get('stitch') is None
+
+            if handle in also:
+                rows.append(r); continue          # explicit confirmation wins
+            if unreadable:
+                excluded.append((r, 'permissions unreadable - verify in app'))
+                continue
             if not reuse:
-                excluded.append((r, 'no duet/stitch')); continue
+                excluded.append((r, 'duet+stitch disabled')); continue
             if args.require_download and not dl:
                 excluded.append((r, 'download disabled')); continue
             rows.append(r)

@@ -67,6 +67,17 @@ def fetch_permissions(url, timeout=40):
         raise RuntimeError("no rehydration payload (removed or login-walled?)")
     s = json.dumps(json.loads(m.group(1)))
 
+    # No itemStruct means TikTok returned an error payload rather than video
+    # data -- commonly statusCode 10204 (author unavailable: private,
+    # suspended, deleted or region-locked). That is UNREADABLE, not "reuse
+    # denied", and must not be reported as a permission decision.
+    if '"itemStruct"' not in s:
+        code = re.search(r'"statusCode":\s*(\d+)', s)
+        msg = re.search(r'"statusMsg":\s*"([^"]{0,40})', s)
+        raise LookupError(
+            f"no video data (statusCode={code.group(1) if code else '?'} "
+            f"{msg.group(1) if msg else ''})")
+
     def flag(key):
         hit = re.search(rf'"{key}":\s*(true|false)', s)
         return (hit.group(1) == 'true') if hit else None
@@ -120,7 +131,7 @@ def cmd_check(args):
         return 0
 
     print(f"Checking {len(rows)} video(s)\n")
-    ok = blocked = failed = 0
+    ok = blocked = failed = unknown = 0
     for i, r in enumerate(rows, 1):
         try:
             p = fetch_permissions(r['url'])
@@ -130,20 +141,28 @@ def cmd_check(args):
                         download_enabled=%s, permissions_checked_at=now()
                     WHERE id=%s
                 """, (p['duet'], p['stitch'], p['download'], r['id']))
-            allowed = bool(p['duet'] or p['stitch'])
-            ok += 1 if allowed else 0
-            blocked += 0 if allowed else 1
+            if p['duet'] is None and p['stitch'] is None:
+                verdict = 'UNKNOWN - check manually'
+                unknown += 1
+            elif p['duet'] or p['stitch']:
+                verdict = 'REUSE OK'; ok += 1
+            else:
+                verdict = 'NO REUSE'; blocked += 1
             print(f"[{i}/{len(rows)}] @{(r['author'] or '?'):22} "
                   f"duet={str(p['duet']):5} stitch={str(p['stitch']):5} "
-                  f"download={str(p['download']):5} "
-                  f"{'REUSE OK' if allowed else 'NO REUSE'}")
+                  f"download={str(p['download']):5} {verdict}")
         except Exception as ex:
             failed += 1
             print(f"[{i}/{len(rows)}] @{(r['author'] or '?'):22} "
                   f"FAILED {type(ex).__name__}: {str(ex)[:70]}")
         time.sleep(random.uniform(args.min_delay, args.max_delay))
 
-    print(f"\nreuse allowed: {ok}   no reuse: {blocked}   unreadable: {failed}")
+    print(f"\nreuse allowed: {ok}   no reuse: {blocked}   "
+          f"unknown: {unknown}   fetch failed: {failed}")
+    if unknown or failed:
+        print("Unknown/failed are NOT denials - the page had no readable video "
+              "data.\nCheck those in the app, then allow them explicitly with "
+              "make_clips.py --also-allow.")
     return 0
 
 
