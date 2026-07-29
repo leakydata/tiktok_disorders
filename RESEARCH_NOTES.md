@@ -10,6 +10,33 @@ of a finding, not just the finding.
 
 ---
 
+## 2026-07-29 — yt-dlp impersonation was silently disabled (TikTok blocks)
+
+`uv sync` resolved **curl-cffi 0.14.0**, but yt-dlp 2025.12.08 accepts only
+`0.5.10` or `>=0.10,<0.14` and raises `ImportError` on anything else. That
+import failure is swallowed, leaving **0 impersonate targets** and only a
+non-fatal warning per download:
+
+    WARNING: [TikTok] The extractor is attempting impersonation, but no
+    impersonate target is available.
+
+Without impersonation TikTok blocks a large share of requests — this is the
+likely cause of the "Your IP address is blocked from accessing this post"
+errors seen during engagement snapshots, and of `urls_failed.txt` having
+grown to 1,628 entries.
+
+Fixed by pinning `curl-cffi>=0.13.0,<0.14` in `pyproject.toml` (was
+`>=0.13.0`, which let the incompatible 0.14 in). After the pin: **31
+impersonate targets**, warning gone, downloads succeed.
+
+Check after any dependency update:
+
+    .venv/bin/python -c "from yt_dlp import YoutubeDL; \
+      print(len(YoutubeDL({'quiet':True})._get_available_impersonate_targets()))"
+
+Zero means impersonation is off and collection is degraded.
+
+
 ## 2026-07-29 — Extraction provider benchmark (measured, not estimated)
 
 All four candidates run against the **same** combined-extraction system prompt
