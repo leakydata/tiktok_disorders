@@ -578,6 +578,21 @@ def cmd_extract(args):
 
     min_words = getattr(args, 'min_words', 20)
     force = getattr(args, 'force', False)
+
+    # The default song filter treats an unscored transcript as passing, because
+    # NULL < X is unknown. That means transcripts never run through
+    # detect_song_lyrics.py are extracted without anyone knowing whether they
+    # are speech or song lyrics. --require-scored inverts that to fail-closed,
+    # so an extraction pass can only ever touch transcripts whose content has
+    # actually been checked.
+    require_scored = getattr(args, 'require_scored', False)
+    song_filter = (
+        't.song_lyrics_ratio IS NOT NULL AND t.song_lyrics_ratio < %s'
+        if require_scored else
+        '(t.song_lyrics_ratio IS NULL OR t.song_lyrics_ratio < %s)'
+    )
+    if require_scored:
+        print("Restricting to song-detected transcripts (--require-scored)")
     
     if args.video_id:
         video_ids = [args.video_id]
@@ -588,13 +603,13 @@ def cmd_extract(args):
         # Find transcripts for specific user(s)
         with get_connection() as conn:
             cur = conn.cursor()
-            cur.execute("""
+            cur.execute(f"""
                 SELECT DISTINCT t.video_id
                 FROM transcripts t
                 JOIN videos v ON t.video_id = v.id
                 WHERE v.author = ANY(%s)
                   AND (t.extracted_at IS NULL OR %s)
-                  AND (t.song_lyrics_ratio IS NULL OR t.song_lyrics_ratio < %s)
+                  AND {song_filter}
                   AND (t.word_count IS NULL OR t.word_count >= %s)
             """, (args.user, force, args.max_song_ratio, min_words))
             video_ids = [row[0] for row in cur.fetchall()]
@@ -620,10 +635,10 @@ def cmd_extract(args):
             
             if force:
                 # Force mode: include all transcripts (ignore extracted_at)
-                cur.execute("""
+                cur.execute(f"""
                     SELECT DISTINCT t.video_id
                     FROM transcripts t
-                    WHERE (t.song_lyrics_ratio IS NULL OR t.song_lyrics_ratio < %s)
+                    WHERE {song_filter}
                       AND (t.word_count IS NULL OR t.word_count >= %s)
                 """, (args.max_song_ratio, min_words))
                 video_ids = [row[0] for row in cur.fetchall()]
@@ -650,11 +665,11 @@ def cmd_extract(args):
                     print(f"Force mode: cleared extraction status for {len(video_ids)} videos")
             else:
                 # Normal mode: exclude already extracted
-                cur.execute("""
+                cur.execute(f"""
                     SELECT DISTINCT t.video_id
                     FROM transcripts t
                     WHERE t.extracted_at IS NULL
-                      AND (t.song_lyrics_ratio IS NULL OR t.song_lyrics_ratio < %s)
+                      AND {song_filter}
                       AND (t.word_count IS NULL OR t.word_count >= %s)
                 """, (args.max_song_ratio, min_words))
                 video_ids = [row[0] for row in cur.fetchall()]
@@ -664,13 +679,23 @@ def cmd_extract(args):
                     SELECT 
                         COUNT(*) FILTER (WHERE t.extracted_at IS NOT NULL) as already_extracted,
                         COUNT(*) FILTER (WHERE t.extracted_at IS NULL AND t.song_lyrics_ratio >= %s) as skipped_lyrics,
-                        COUNT(*) FILTER (WHERE t.extracted_at IS NULL AND t.word_count < %s) as skipped_short
+                        COUNT(*) FILTER (WHERE t.extracted_at IS NULL AND t.word_count < %s) as skipped_short,
+                        COUNT(*) FILTER (WHERE t.extracted_at IS NULL AND t.song_lyrics_ratio IS NULL) as unscored
                     FROM transcripts t
                 """, (args.max_song_ratio, min_words))
                 row = cur.fetchone()
                 already_extracted = row[0]
                 skipped_lyrics = row[1]
                 skipped_short = row[2]
+                unscored = row[3]
+                if unscored:
+                    if require_scored:
+                        print(f"  Excluded {unscored} unscored transcript(s) "
+                              f"- run scripts/detect_song_lyrics.py to include them")
+                    else:
+                        print(f"  WARNING: {unscored} transcript(s) have no song "
+                              f"score and will be extracted unchecked. "
+                              f"Use --require-scored to exclude them.")
 
         if not video_ids:
             print("All transcripts already processed!")
