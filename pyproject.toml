@@ -21,7 +21,9 @@ dependencies = [
   "seaborn>=0.13.0",
   "python-dotenv>=1.0.0",
   "requests>=2.31.0",
-  "curl-cffi>=0.13.0",
+  # yt-dlp's impersonation handler rejects >=0.14; without a supported
+  # version TikTok blocks a large share of requests.
+  "curl-cffi>=0.13.0,<0.14",
   "tiktokapipy>=0.2.0",
 ]
 
