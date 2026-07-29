@@ -162,9 +162,11 @@ def cmd_match(args):
                   AND t.song_lyrics_ratio < 0.2
                   AND t.segments IS NOT NULL
                   AND v.view_count >= %s
+                  AND (%s IS NULL OR v.author ILIKE %s)
                 ORDER BY v.view_count DESC NULLS LAST
                 LIMIT %s
-            """, (query, query, args.min_views, args.per_line * 4))
+            """, (query, query, args.min_views, args.creator, args.creator,
+                  args.per_line * 4))
 
             terms = [w for w in words] + [p for p in phrases]
             picked = 0
@@ -225,6 +227,9 @@ def main():
     m.add_argument('--min-views', type=int, default=0, help='Minimum view count')
     m.add_argument('--min-overlap', type=int, default=1,
                    help='Minimum term overlap for a segment to qualify')
+    m.add_argument('--creator',
+                   help='Restrict matches to one creator (use when you have '
+                        'that creator\'s direct permission)')
     m.add_argument('--out', help='Write candidates to this CSV')
     args = p.parse_args()
     return {'index': cmd_index, 'match': cmd_match}[args.command](args)
