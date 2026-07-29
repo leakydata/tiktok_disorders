@@ -77,9 +77,29 @@ def main():
     if 'match_quality' not in fields:
         fields.append('match_quality')
 
-    # Best existing row per line, so the merged output is one clip per line.
+    # Existing rows must clear the same permission bar as backfilled ones --
+    # otherwise a line whose top match is a withdrawn or non-permitted video
+    # carries straight through and never gets replaced.
+    with get_connection() as conn:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("""SELECT url FROM videos
+                       WHERE url = ANY(%s) AND (duet_enabled OR stitch_enabled)""",
+                    (list({r['url'] for r in existing if r.get('url')}),))
+        allowed_urls = {r['url'] for r in cur.fetchall()}
+
+    rejected = [r for r in existing if r.get('url') not in allowed_urls]
+    if rejected:
+        print(f"Discarding {len(rejected)} existing row(s) whose video is not "
+              f"permitted or is withdrawn:")
+        for r in sorted({x['creator'] for x in rejected}):
+            print(f"    @{r}")
+        print()
+
+    # Best surviving row per line, so the merged output is one clip per line.
     best = {}
     for r in existing:
+        if r.get('url') not in allowed_urls:
+            continue
         key = (r['section'], r['lyric'])
         if key not in best or float(r['similarity']) > float(best[key]['similarity']):
             r.setdefault('match_quality', 'strong')
