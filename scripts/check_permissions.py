@@ -82,10 +82,24 @@ def fetch_permissions(url, timeout=40):
         hit = re.search(rf'"{key}":\s*(true|false)', s)
         return (hit.group(1) == 'true') if hit else None
 
+    def display(key):
+        """Fallback for payloads lacking the boolean fields.
+
+        Some videos carry duetDisplay / stitchDisplay instead of
+        duetEnabled / stitchEnabled. These use the same convention as
+        downloadSetting: 0 means shown/allowed, non-zero means restricted.
+        Without this fallback such videos report as UNKNOWN even though the
+        permission is stated.
+        """
+        hit = re.search(rf'"{key}":\s*(\d+)', s)
+        return (hit.group(1) == '0') if hit else None
+
     dl = re.search(r'"downloadSetting":\s*(\d+)', s)
+    duet = flag('duetEnabled')
+    stitch = flag('stitchEnabled')
     return {
-        'duet': flag('duetEnabled'),
-        'stitch': flag('stitchEnabled'),
+        'duet': duet if duet is not None else display('duetDisplay'),
+        'stitch': stitch if stitch is not None else display('stitchDisplay'),
         # downloadSetting 0 = allowed; anything else restricts it.
         'download': (dl.group(1) == '0') if dl else None,
     }
