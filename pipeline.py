@@ -989,6 +989,10 @@ Examples:
     ex_parser.add_argument('--all', action='store_true', help='Extract from all unprocessed transcripts')
     ex_parser.add_argument('--user', action='append', help='TikTok username(s) to extract from')
     ex_parser.add_argument('--provider', help='Extractor provider (ollama, deepseek, minimax, or anthropic)')
+    ex_parser.add_argument('--require-scored', action='store_true',
+                           help='Only extract transcripts that have already been '
+                                'song-detected. Without this, unscored transcripts '
+                                'pass the song filter and are extracted unchecked.')
     ex_parser.add_argument('--model', help='Extractor model name')
     ex_parser.add_argument('--min-confidence', type=float, default=0.6, help='Min symptom confidence')
     ex_parser.add_argument('--no-parallel', action='store_true', help='Disable parallel extraction')
