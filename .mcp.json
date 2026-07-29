@@ -1,9 +1,0 @@
-{
-  "mcpServers": {
-    "db": {
-      "type": "stdio",
-      "command": "npx",
-      "args": ["-y", "@bytebase/dbhub", "--dsn", "postgresql://postgres:2!Vacarosa@localhost:5433/tiktok_disorders"]
-    }
-  }
-}
