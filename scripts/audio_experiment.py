@@ -260,6 +260,61 @@ def cmd_report(args):
     return 0
 
 
+def cmd_sweep(args):
+    """Sweep the Silero VAD speech-probability threshold.
+
+    The threshold trades two failure modes against each other: too high drops
+    real speech, too low lets music through and hallucination returns. The
+    right value is corpus-dependent, so measure it rather than take the
+    library default.
+    """
+    from faster_whisper import WhisperModel
+
+    sample = _sample(args.sample)
+    if not sample:
+        print("No videos matched.")
+        return 1
+
+    model = WhisperModel(args.model, device='cuda', compute_type='float16')
+    print(f"Sweeping thresholds {args.thresholds} over {len(sample)} videos\n")
+
+    for thr in args.thresholds:
+        arm = f"vad_t{thr}"
+        print(f"===== threshold {thr} =====")
+        for i, row in enumerate(sample, 1):
+            if not Path(row['audio_path']).exists():
+                _store(args.label, arm, row, error='audio file missing')
+                continue
+            text, elapsed, err = '', 0.0, None
+            try:
+                t0 = time.time()
+                segs, _ = model.transcribe(
+                    row['audio_path'], language='en', beam_size=5,
+                    initial_prompt=MEDICAL_VOCABULARY_PROMPT,
+                    vad_filter=True,
+                    vad_parameters={
+                        'threshold': thr,
+                        'min_speech_duration_ms': WHISPER_VAD_MIN_SPEECH_MS,
+                        'min_silence_duration_ms': WHISPER_VAD_MIN_SILENCE_MS,
+                        'speech_pad_ms': WHISPER_VAD_SPEECH_PAD_MS,
+                    })
+                text = ' '.join(s.text for s in segs).strip()
+                elapsed = time.time() - t0
+            except Exception as exc:
+                err = f"{type(exc).__name__}: {exc}"[:400]
+            ratio, conf = (detect_song_lyrics_heuristic(text)
+                           if text else (None, None))
+            _store(args.label, arm, row, text=text, elapsed=elapsed,
+                   song_ratio=ratio, song_conf=conf, error=err)
+            print(f"  [{i}/{len(sample)}] {row['stratum']:12} "
+                  f"words={len(text.split()):>4} {elapsed:>5.1f}s")
+        print()
+
+    print(f"Report with: python scripts/audio_experiment.py report "
+          f"--label {args.label}")
+    return 0
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -278,8 +333,16 @@ def main():
     rep = sub.add_parser('report', help='Summarize results')
     rep.add_argument('--label')
 
+    sw = sub.add_parser('sweep', help='Sweep the VAD threshold')
+    sw.add_argument('--sample', type=int, default=8)
+    sw.add_argument('--thresholds', nargs='+', type=float,
+                    default=[0.2, 0.35, 0.5, 0.65, 0.8])
+    sw.add_argument('--model', default='large-v3')
+    sw.add_argument('--label', default='sweep1')
+
     args = p.parse_args()
-    return {'init': cmd_init, 'run': cmd_run, 'report': cmd_report}[args.command](args)
+    return {'init': cmd_init, 'run': cmd_run, 'report': cmd_report,
+            'sweep': cmd_sweep}[args.command](args)
 
 
 if __name__ == '__main__':
