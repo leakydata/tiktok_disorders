@@ -177,6 +177,12 @@ def main():
     p.add_argument('--tail', type=float, default=0.20,
                    help='Seconds taken after the segment end (default 0.20)')
     p.add_argument('--min-similarity', type=float, default=0.0)
+    p.add_argument('--min-views', type=int, default=0,
+                   help='Drop clips from videos below this view count')
+    p.add_argument('--min-symptoms', type=int, default=0,
+                   help='Require the video to have at least N extracted '
+                        'symptoms, i.e. someone actually describing illness '
+                        'rather than a phrasing coincidence')
     p.add_argument('--also-allow', metavar='FILE',
                    help='File of handles separately confirmed, one per line. '
                         'Overrides unreadable or missing permissions.')
