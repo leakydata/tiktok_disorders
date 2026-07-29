@@ -16,6 +16,9 @@ from config import (
     DEEPSEEK_API_KEY,
     DEEPSEEK_MODEL,
     DEEPSEEK_URL,
+    MINIMAX_API_KEY,
+    MINIMAX_MODEL,
+    MINIMAX_URL,
     EXTRACTOR_PROVIDER,
     MIN_CONFIDENCE_SCORE,
     OLLAMA_MODEL,
@@ -408,8 +411,9 @@ class SymptomExtractor:
         self.provider = (provider or EXTRACTOR_PROVIDER).lower()
         self.max_song_ratio = max_song_ratio
         self.enable_thinking = enable_thinking
-        if self.provider not in {"anthropic", "ollama", "deepseek"}:
-            raise ValueError("provider must be 'anthropic', 'ollama', or 'deepseek'")
+        if self.provider not in {"anthropic", "ollama", "deepseek", "minimax"}:
+            raise ValueError(
+                "provider must be 'anthropic', 'ollama', 'deepseek', or 'minimax'")
 
         # Set up model and API key based on provider
         if self.provider == "anthropic":
@@ -428,6 +432,13 @@ class SymptomExtractor:
                 api_key=self.api_key,
                 base_url=DEEPSEEK_URL
             )
+        elif self.provider == "minimax":
+            self.api_key = api_key or MINIMAX_API_KEY
+            self.model = model or MINIMAX_MODEL
+            if not self.api_key:
+                raise ValueError("MINIMAX_API_KEY is required for MiniMax")
+            # OpenAI-compatible endpoint, so the same SDK works.
+            self.client = OpenAI(api_key=self.api_key, base_url=MINIMAX_URL)
         else:  # ollama
             self.api_key = None
             self.model = model or OLLAMA_MODEL
@@ -454,7 +465,7 @@ class SymptomExtractor:
         
         # High-capability models get longer timeouts and combined extraction
         # All API providers (anthropic, deepseek) are high-capability
-        self.is_high_capability = self.provider in {'anthropic', 'deepseek'} or any(x in model_lower for x in [
+        self.is_high_capability = self.provider in {'anthropic', 'deepseek', 'minimax'} or any(x in model_lower for x in [
             'gpt-oss', 'qwen', 'llama3', 'llama-3', 'mixtral', 'medgemma',
             'gemma', 'phi', 'glm', 'deepseek', 'yi', 'mistral', 'command-r',
             'claude', 'gpt-4', 'wizard', 'solar', 'nous', 'dolphin',
@@ -1576,8 +1587,8 @@ Return ONLY the JSON object, no additional text."""
             response = self.client.messages.create(**kwargs)
             return response.content[0].text.strip()
 
-        if self.provider == "deepseek":
-            # DeepSeek uses OpenAI-compatible API; system goes as a system role message
+        if self.provider in ("deepseek", "minimax"):
+            # Both expose OpenAI-compatible APIs; system goes as a system role message
             messages = []
             if system:
                 messages.append({"role": "system", "content": system})

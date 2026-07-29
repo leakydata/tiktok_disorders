@@ -22,6 +22,11 @@ EXTRACTOR_PROVIDER = os.getenv('EXTRACTOR_PROVIDER', 'anthropic')
 ANTHROPIC_MODEL = os.getenv('ANTHROPIC_MODEL', 'claude-opus-4-5-20251101')
 DEEPSEEK_MODEL = os.getenv('DEEPSEEK_MODEL', 'deepseek-chat')  # or deepseek-reasoner
 DEEPSEEK_URL = os.getenv('DEEPSEEK_URL', 'https://api.deepseek.com')
+MINIMAX_API_KEY = os.getenv('MINIMAX_API_KEY')
+MINIMAX_MODEL = os.getenv('MINIMAX_MODEL', 'MiniMax-M3')
+# MiniMax exposes an OpenAI-compatible chat endpoint at this base; the SDK
+# appends /chat/completions.
+MINIMAX_URL = os.getenv('MINIMAX_URL', 'https://api.minimax.io/v1')
 OLLAMA_URL = os.getenv('OLLAMA_URL', 'http://localhost:11434')
 OLLAMA_MODEL = os.getenv('OLLAMA_MODEL', 'gpt-oss:20b')
 HF_TOKEN = os.getenv('HF_TOKEN')
@@ -80,8 +85,12 @@ def validate_config():
     """Validate required configuration is present."""
     errors = []
 
-    if EXTRACTOR_PROVIDER not in {'anthropic', 'ollama', 'deepseek'}:
-        errors.append("EXTRACTOR_PROVIDER must be 'anthropic', 'ollama', or 'deepseek'")
+    if EXTRACTOR_PROVIDER not in {'anthropic', 'ollama', 'deepseek', 'minimax'}:
+        errors.append(
+            "EXTRACTOR_PROVIDER must be 'anthropic', 'ollama', 'deepseek', or 'minimax'")
+
+    if EXTRACTOR_PROVIDER == 'minimax' and not MINIMAX_API_KEY:
+        errors.append("MINIMAX_API_KEY is not set")
 
     if EXTRACTOR_PROVIDER == 'anthropic' and not ANTHROPIC_API_KEY:
         errors.append("ANTHROPIC_API_KEY is not set")

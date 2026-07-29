@@ -927,7 +927,7 @@ Examples:
     run_parser.add_argument('--tags', nargs='+', default=['EDS', 'MCAS', 'POTS'], help='Tags for videos')
     run_parser.add_argument('--resume', type=int, help='Resume a previous run by ID')
     run_parser.add_argument('--whisper-model', default='large-v3', help='Whisper model size')
-    run_parser.add_argument('--provider', help='Extractor provider (anthropic or ollama)')
+    run_parser.add_argument('--provider', help='Extractor provider (anthropic, ollama, deepseek, or minimax)')
     run_parser.add_argument('--model', help='Extractor model name')
     run_parser.add_argument('--min-confidence', type=float, default=0.6, help='Min symptom confidence')
     run_parser.add_argument('--no-move-processed', action='store_true',
@@ -963,7 +963,7 @@ Examples:
     ex_parser.add_argument('--video-id', type=int, help='Single video database ID')
     ex_parser.add_argument('--all', action='store_true', help='Extract from all unprocessed transcripts')
     ex_parser.add_argument('--user', action='append', help='TikTok username(s) to extract from')
-    ex_parser.add_argument('--provider', help='Extractor provider (ollama, deepseek, or anthropic)')
+    ex_parser.add_argument('--provider', help='Extractor provider (ollama, deepseek, minimax, or anthropic)')
     ex_parser.add_argument('--model', help='Extractor model name')
     ex_parser.add_argument('--min-confidence', type=float, default=0.6, help='Min symptom confidence')
     ex_parser.add_argument('--no-parallel', action='store_true', help='Disable parallel extraction')
