@@ -59,6 +59,24 @@ def adjust_window(start, end, min_len, max_len, lead, tail):
     return round(s, 3), round(e - s, 3)    # (seek, duration)
 
 
+def video_permissions(urls):
+    """Look up recorded reuse permissions for a set of video URLs."""
+    from database import get_connection as _gc
+    from psycopg2.extras import RealDictCursor as _RDC
+    out = {}
+    with _gc() as conn:
+        cur = conn.cursor(cursor_factory=_RDC)
+        cur.execute("""SELECT url, duet_enabled, stitch_enabled, download_enabled
+                       FROM videos
+                       WHERE url = ANY(%s) AND permissions_checked_at IS NOT NULL""",
+                    (list(set(urls)),))
+        for r in cur.fetchall():
+            out[r['url']] = {'duet': r['duet_enabled'],
+                             'stitch': r['stitch_enabled'],
+                             'download': r['download_enabled']}
+    return out
+
+
 def load_permitted(path):
     if not path:
         return None
@@ -126,6 +144,9 @@ def main():
     p.add_argument('--tail', type=float, default=0.20,
                    help='Seconds taken after the segment end (default 0.20)')
     p.add_argument('--min-similarity', type=float, default=0.0)
+    p.add_argument('--require-download', action='store_true',
+                   help='Also require the creator to have left downloads '
+                        'enabled, not just duet/stitch')
     p.add_argument('--limit', type=int)
     p.add_argument('--dry-run', action='store_true',
                    help='Show the planned cuts without downloading')
@@ -137,16 +158,43 @@ def main():
     permitted = load_permitted(args.creators_file)
     if args.creator:
         permitted = (permitted or set()) | {args.creator.lower().lstrip('@')}
-    if permitted is None:
-        print("Refusing to run without an explicit permission list.")
-        print("Pass --creators-file or --creator. Every clip cut here leaves")
-        print("TikTok's Duet/Stitch permission mechanism, so the allowed set")
-        print("has to be stated rather than assumed.")
-        return 1
 
-    rows = [r for r in csv.DictReader(open(args.csv, encoding='utf-8'))
-            if (r.get('creator') or '').lower().lstrip('@') in permitted
-            and float(r.get('similarity') or 0) >= args.min_similarity]
+    all_rows = [r for r in csv.DictReader(open(args.csv, encoding='utf-8'))
+                if float(r.get('similarity') or 0) >= args.min_similarity]
+
+    if permitted is not None:
+        rows = [r for r in all_rows
+                if (r.get('creator') or '').lower().lstrip('@') in permitted]
+    else:
+        # Derive the allowed set from the per-video settings recorded by
+        # check_permissions.py. This is stricter than a creator-level list:
+        # permissions are per video, so one creator can allow reuse on some
+        # uploads and not others.
+        urls = [r['url'] for r in all_rows if r.get('url')]
+        perms = video_permissions(urls)
+        unchecked = [u for u in urls if u not in perms]
+        if unchecked:
+            print(f"{len(unchecked)} of {len(set(urls))} video(s) have no recorded "
+                  f"permissions. Run first:")
+            print(f"  uv run scripts/check_permissions.py check --from-csv {args.csv}")
+            return 1
+        rows, excluded = [], []
+        for r in all_rows:
+            p = perms.get(r['url'], {})
+            reuse = bool(p.get('duet') or p.get('stitch'))
+            dl = bool(p.get('download'))
+            if not reuse:
+                excluded.append((r, 'no duet/stitch')); continue
+            if args.require_download and not dl:
+                excluded.append((r, 'download disabled')); continue
+            rows.append(r)
+        if excluded:
+            print(f"Excluded {len(excluded)} clip(s) on permissions:")
+            for r, why in excluded[:8]:
+                print(f"    @{r['creator']:22} {why}")
+            if len(excluded) > 8:
+                print(f"    ... and {len(excluded)-8} more")
+            print()
 
     # Song order, strongest match first within each lyric line.
     seen_order, order_idx = {}, 0
