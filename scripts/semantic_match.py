@@ -177,25 +177,32 @@ def cmd_match(args):
     with get_connection() as conn:
         cur = conn.cursor(cursor_factory=RealDictCursor)
         for (section, line), qv in zip(lyrics, vecs):
-            where, params = ["1=1"], [str(qv)]
+            # Placeholder order must match the SQL exactly: the query vector
+            # appears once in the CTE, then the optional filters, then the
+            # distance ceiling and row limit.
+            filters, filter_params = [], []
             if args.creator:
-                where.append("v.author ILIKE %s"); params.append(args.creator)
+                filters.append("v.author ILIKE %s"); filter_params.append(args.creator)
             if args.min_views:
-                where.append("v.view_count >= %s"); params.append(args.min_views)
-            params.append(args.max_distance)
-            params.append(args.per_line)
+                filters.append("v.view_count >= %s"); filter_params.append(args.min_views)
+            filter_sql = (' AND ' + ' AND '.join(filters)) if filters else ''
 
+            # Compute distance once in a CTE so it can be filtered and ordered
+            # without repeating the vector literal.
             cur.execute(f"""
-                SELECT v.author, v.url, v.view_count,
-                       se.start_s, se.end_s, se.text,
-                       se.embedding <=> %s::vector AS distance
-                FROM segment_embeddings se
-                JOIN videos v ON v.id = se.video_id
-                WHERE {' AND '.join(where)}
-                  AND se.embedding <=> (SELECT %s::vector) < %s
+                WITH scored AS (
+                    SELECT v.author, v.url, v.view_count,
+                           se.start_s, se.end_s, se.text,
+                           se.embedding <=> %s::vector AS distance
+                    FROM segment_embeddings se
+                    JOIN videos v ON v.id = se.video_id
+                    WHERE TRUE{filter_sql}
+                )
+                SELECT * FROM scored
+                WHERE distance < %s
                 ORDER BY distance ASC
                 LIMIT %s
-            """, [str(qv)] + params[1:])
+            """, [str(qv), *filter_params, args.max_distance, args.per_line])
 
             got = cur.fetchall()
             print(f"[{section}] {line}")
