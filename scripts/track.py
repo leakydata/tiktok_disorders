@@ -39,6 +39,14 @@ DEFAULT_URL_FILE = Path(__file__).parent.parent / 'urls.txt'
 # Follower thresholds for creator_tier, mirroring
 # VideoDownloader._calculate_creator_tier so backfilled rows agree with rows
 # written at download time.
+#
+# KNOWN LIMITATION (verified 2026-07-29): yt-dlp returns None for
+# channel_follower_count / uploader_follower_count on TikTok, from both video
+# and profile URLs. creator_tier is therefore NULL for all 79,369 collected
+# videos and cannot be backfilled through this path. The COALESCE below is
+# retained so tiers populate automatically if a future extractor version or an
+# alternate source (e.g. tiktokapipy) supplies the field, but as of now it is
+# inert. Any STRAIN creator-influence analysis needs another follower source.
 TIER_THRESHOLDS = [
     (10_000, 'nano'), (100_000, 'micro'),
     (500_000, 'mid'), (1_000_000, 'macro'),

@@ -103,3 +103,5 @@ urls*.txt
 
 # UV lock file (regenerated from pyproject.toml)
 uv.lock
+# Contains a database DSN; keep credentials out of the repo.
+.mcp.json

@@ -29,6 +29,11 @@ from config import (
     WHISPER_MODEL,
     TRANSCRIBER_BACKEND,
     WHISPER_COMPUTE_TYPE,
+    WHISPER_VAD,
+    WHISPER_VAD_THRESHOLD,
+    WHISPER_VAD_MIN_SPEECH_MS,
+    WHISPER_VAD_MIN_SILENCE_MS,
+    WHISPER_VAD_SPEECH_PAD_MS,
     ensure_directories,
 )
 from database import insert_transcript, get_video_by_id, get_transcript, insert_transcript_quality
@@ -647,12 +652,29 @@ class AudioTranscriber:
         print(f"Using model: {self.model_size} on {self.device} ({self.backend})")
 
         if self.backend == 'faster-whisper':
+            # VAD is applied unless the caller overrides it explicitly, so the
+            # A/B harness can request a baseline run with vad_filter=False.
+            vad_opts = {}
+            if 'vad_filter' not in kwargs and WHISPER_VAD:
+                vad_opts = {
+                    'vad_filter': True,
+                    'vad_parameters': {
+                        'threshold': WHISPER_VAD_THRESHOLD,
+                        'min_speech_duration_ms': WHISPER_VAD_MIN_SPEECH_MS,
+                        'min_silence_duration_ms': WHISPER_VAD_MIN_SILENCE_MS,
+                        'speech_pad_ms': WHISPER_VAD_SPEECH_PAD_MS,
+                    },
+                }
+                print("VAD: enabled (Silero, "
+                      f"threshold={WHISPER_VAD_THRESHOLD})")
+
             segments_iter, info = self.model.transcribe(
                 str(audio_path),
                 language=language,
                 beam_size=5,
                 temperature=temperature,
                 initial_prompt=MEDICAL_VOCABULARY_PROMPT,
+                **vad_opts,
                 **kwargs,
             )
 

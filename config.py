@@ -43,6 +43,24 @@ WHISPER_MODELS = ['tiny', 'base', 'small', 'medium', 'large']
 TRANSCRIBER_BACKEND = os.getenv('TRANSCRIBER_BACKEND', 'faster-whisper')
 WHISPER_COMPUTE_TYPE = os.getenv('WHISPER_COMPUTE_TYPE', 'auto')
 
+# Voice activity detection (faster-whisper only). Silero VAD drops non-speech
+# regions before decoding, which suppresses Whisper's tendency to hallucinate
+# text over music and silence. Roughly 20% of this corpus is music-heavy
+# (song_lyrics_ratio >= 0.2), so this is on by default.
+#
+# Set WHISPER_VAD=false to reproduce pre-2026-07 transcription behaviour.
+WHISPER_VAD = os.getenv('WHISPER_VAD', 'true').lower() not in ('false', '0', 'no')
+# Speech probability threshold. Higher = stricter about what counts as speech.
+WHISPER_VAD_THRESHOLD = float(os.getenv('WHISPER_VAD_THRESHOLD', '0.5'))
+# Speech shorter than this (ms) is discarded.
+WHISPER_VAD_MIN_SPEECH_MS = int(os.getenv('WHISPER_VAD_MIN_SPEECH_MS', '250'))
+# Silence shorter than this (ms) does not split a speech region. Kept generous
+# so natural pauses mid-sentence do not fragment segments.
+WHISPER_VAD_MIN_SILENCE_MS = int(os.getenv('WHISPER_VAD_MIN_SILENCE_MS', '700'))
+# Padding retained either side of detected speech (ms), so VAD does not clip
+# quiet word onsets.
+WHISPER_VAD_SPEECH_PAD_MS = int(os.getenv('WHISPER_VAD_SPEECH_PAD_MS', '200'))
+
 # Analysis Configuration
 MIN_CONFIDENCE_SCORE = float(os.getenv('MIN_CONFIDENCE_SCORE', '0.6'))
 CLUSTER_COUNT = int(os.getenv('CLUSTER_COUNT', '5'))
