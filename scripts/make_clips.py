@@ -177,6 +177,9 @@ def main():
     p.add_argument('--tail', type=float, default=0.20,
                    help='Seconds taken after the segment end (default 0.20)')
     p.add_argument('--min-similarity', type=float, default=0.0)
+    p.add_argument('--best-per-line', action='store_true',
+                   help='Keep only the strongest surviving candidate per lyric '
+                        'line, so excluded clips are backfilled automatically')
     p.add_argument('--min-views', type=int, default=0,
                    help='Drop clips from videos below this view count')
     p.add_argument('--min-symptoms', type=int, default=0,
@@ -285,6 +288,24 @@ def main():
             seen_order[key] = order_idx; order_idx += 1
     rows.sort(key=lambda r: (seen_order.get((r['section'], r['lyric']), 999),
                              -float(r.get('similarity') or 0)))
+
+    # One clip per lyric line, strongest surviving candidate. Because the
+    # filters above run before this, a line whose best match was excluded on
+    # permissions, popularity or topic automatically falls through to its next
+    # candidate rather than going empty -- which is what --per-line spares are
+    # for.
+    if args.best_per_line:
+        picked, by_line = [], set()
+        for r in rows:
+            key = (r['section'], r['lyric'])
+            if key in by_line:
+                continue
+            by_line.add(key); picked.append(r)
+        replaced = len(rows) - len(picked)
+        print(f"Selected {len(picked)} clip(s), one per lyric line "
+              f"({replaced} lower-ranked alternate(s) held in reserve)\n")
+        rows = picked
+
     if args.limit:
         rows = rows[:args.limit]
 
