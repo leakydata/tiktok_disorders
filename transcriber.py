@@ -2,6 +2,36 @@
 Advanced audio transcription module using Whisper.
 Optimized for GPU acceleration (RTX 4090) with support for large models.
 """
+def _preload_cuda_libraries():
+    """Make the pip-installed CUDA runtime visible to CTranslate2.
+
+    CTranslate2 dlopen()s libcublas/libcudnn by soname. Those ship as pip
+    packages under site-packages/nvidia/*/lib, which is not on the loader
+    path, so GPU transcription fails with "Library libcublas.so.12 is not
+    found" unless LD_LIBRARY_PATH is set before the process starts. Loading
+    them here with RTLD_GLOBAL registers them by soname, so the later dlopen
+    resolves against the already-loaded copies and no env var is required.
+    """
+    import ctypes
+    import sysconfig
+    from pathlib import Path as _Path
+
+    site = _Path(sysconfig.get_paths()['purelib']) / 'nvidia'
+    if not site.is_dir():
+        return
+    # cublas depends on cublasLt, so load that first.
+    for pattern in ('cublas/lib/libcublasLt.so.*', 'cublas/lib/libcublas.so.*',
+                    'cudnn/lib/libcudnn.so.*', 'cuda_nvrtc/lib/libnvrtc.so.*'):
+        for lib in sorted(site.glob(pattern)):
+            try:
+                ctypes.CDLL(str(lib), mode=ctypes.RTLD_GLOBAL)
+                break          # first match per pattern is enough
+            except OSError:
+                continue
+
+
+_preload_cuda_libraries()
+
 try:
     import torch
 except ImportError:
