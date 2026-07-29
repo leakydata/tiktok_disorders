@@ -3,6 +3,7 @@ Symptom extraction module using Claude or Ollama.
 Analyzes transcripts to identify and categorize symptoms with confidence scores.
 Optimized for high-throughput parallel processing.
 """
+import os
 import requests
 from typing import Dict, Any, List, Optional
 import json
@@ -442,6 +443,14 @@ class SymptomExtractor:
         self.is_medgemma = 'medgemma' in model_lower
         self.is_deepseek = 'deepseek' in model_lower or self.provider == 'deepseek'
         self.is_deepseek_reasoner = 'reasoner' in model_lower or 'r1' in model_lower
+        # Models exposing Ollama's native `thinking` capability, which is
+        # toggled by a top-level `think` field rather than a prompt prefix.
+        # Qwen3 is deliberately excluded -- it uses /think and /no_think.
+        self.supports_native_thinking = (
+            self.provider == 'ollama'
+            and not self.is_qwen3
+            and any(t in model_lower for t in ('gemma4', 'gpt-oss', 'glm-4.7'))
+        )
         
         # High-capability models get longer timeouts and combined extraction
         # All API providers (anthropic, deepseek) are high-capability
@@ -1615,18 +1624,48 @@ Return ONLY the JSON object, no additional text."""
         else:
             num_ctx = 65536
             num_predict = 12288
-        
+
+        # A 64K context is far larger than any single transcript needs, and its
+        # KV cache can push a large model off the GPU entirely -- gemma4:31b
+        # spills ~89% to CPU at 32K on a 24GB card. These env vars size the
+        # context to the hardware without changing model defaults.
+        num_ctx = int(os.getenv('OLLAMA_NUM_CTX', num_ctx))
+        num_predict = int(os.getenv('OLLAMA_NUM_PREDICT', num_predict))
+
+        # The system prompt carries the output schema and extraction rules.
+        # Without it the model receives only the raw transcript and replies with
+        # prose, which fails JSON parsing -- this silently broke combined-mode
+        # extraction for every Ollama model.
+        messages = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": final_prompt})
+
+        request_body = {
+            "model": self.model,
+            "messages": messages,
+            "stream": False,
+            # Constrain decoding to JSON so fenced or prose-wrapped answers
+            # cannot reach the parser in the first place.
+            "format": "json",
+            "options": {
+                "num_ctx": num_ctx,
+                "num_predict": num_predict,
+            },
+        }
+
+        # Models with Ollama's native `thinking` capability (gemma4, gpt-oss)
+        # emit chain-of-thought in a separate response field. Qwen3 is excluded
+        # because it is steered by the /think and /no_think prefixes above.
+        # Suppressing thought is a throughput lever, not a correctness one: the
+        # cost is generating the tokens, so discarding them afterwards saves
+        # nothing.
+        if self.supports_native_thinking:
+            request_body["think"] = bool(force_thinking or self.enable_thinking)
+
         response = requests.post(
             f"{self.ollama_url}/api/chat",
-            json={
-                "model": self.model,
-                "messages": [{"role": "user", "content": final_prompt}],
-                "stream": False,
-                "options": {
-                    "num_ctx": num_ctx,
-                    "num_predict": num_predict,
-                }
-            },
+            json=request_body,
             timeout=timeout,
         )
         response.raise_for_status()
