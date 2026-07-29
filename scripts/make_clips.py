@@ -80,6 +80,36 @@ def video_permissions(urls):
     return out
 
 
+def video_topicality(urls):
+    """Per-video popularity and on-topic signal.
+
+    The extraction pipeline already records symptoms and claimed diagnoses per
+    video. A video with no extracted symptoms matched the lyric on phrasing
+    alone -- a mortician, a podcast, a clinician explaining anatomy -- rather
+    than someone describing their own illness. Symptom count is therefore the
+    usable on-topic filter, and it is a property of the video's content, not a
+    judgement about the person.
+    """
+    from database import get_connection as _gc
+    from psycopg2.extras import RealDictCursor as _RDC
+    out = {}
+    with _gc() as conn:
+        cur = conn.cursor(cursor_factory=_RDC)
+        cur.execute("""
+            SELECT v.url, v.view_count,
+                   (SELECT count(*) FROM symptoms s WHERE s.video_id = v.id)
+                       AS n_symptoms,
+                   (SELECT count(*) FROM claimed_diagnoses d WHERE d.video_id = v.id)
+                       AS n_dx
+            FROM videos v WHERE v.url = ANY(%s)
+        """, (list(set(urls)),))
+        for r in cur.fetchall():
+            out[r['url']] = {'views': r['view_count'] or 0,
+                             'symptoms': r['n_symptoms'],
+                             'dx': r['n_dx']}
+    return out
+
+
 def load_permitted(path):
     if not path:
         return None
@@ -169,6 +199,27 @@ def main():
 
     all_rows = [r for r in csv.DictReader(open(args.csv, encoding='utf-8'))
                 if float(r.get('similarity') or 0) >= args.min_similarity]
+
+    # Popularity and on-topic filters, applied before the permission pass so
+    # the exclusion reporting stays readable.
+    if args.min_views or args.min_symptoms:
+        topic = video_topicality([r['url'] for r in all_rows if r.get('url')])
+        kept, dropped = [], []
+        for r in all_rows:
+            t = topic.get(r['url'], {'views': 0, 'symptoms': 0, 'dx': 0})
+            if args.min_views and t['views'] < args.min_views:
+                dropped.append((r, f"only {t['views']:,} views")); continue
+            if args.min_symptoms and t['symptoms'] < args.min_symptoms:
+                dropped.append((r, f"{t['symptoms']} symptoms - off topic")); continue
+            kept.append(r)
+        if dropped:
+            print(f"Dropped {len(dropped)} clip(s) on popularity/topic:")
+            for r, why in dropped[:8]:
+                print(f"    @{r['creator']:24} {why}")
+            if len(dropped) > 8:
+                print(f"    ... and {len(dropped)-8} more")
+            print()
+        all_rows = kept
 
     if permitted is not None:
         rows = [r for r in all_rows
