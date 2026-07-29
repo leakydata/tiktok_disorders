@@ -10,6 +10,96 @@ of a finding, not just the finding.
 
 ---
 
+## 2026-07-29 — VAD enabled; measured effect on transcription quality
+
+`vad_filter` (Silero) is now **on by default** for the faster-whisper path,
+configurable via `WHISPER_VAD*` in `config.py`. Set `WHISPER_VAD=false` to
+reproduce pre-2026-07 behaviour.
+
+Justified by an A/B run (`scripts/audio_experiment.py`, label `exp1`, n=8 per
+stratum, large-v3), not assumption:
+
+| stratum | arm | avg words | avg song ratio | empty | avg s |
+|---|---|---|---|---|---|
+| music_heavy | baseline | 40.5 | 0.269 | 0 | 2.68 |
+| music_heavy | **vad** | 9.1 | **0.180** | **3** | **0.95** |
+| music_some | baseline | 214.9 | 0.156 | 0 | 7.12 |
+| music_some | **vad** | 195.5 | **0.150** | 3 | **3.93** |
+| speech_clean | baseline | 441.5 | 0.013 | 0 | 11.90 |
+| speech_clean | **vad** | **444.5** | **0.006** | **0** | 10.83 |
+
+**Interpretation.** On clean speech VAD is harmless — marginally *more* words
+recovered and no empties, so it does not clip real content. On music-heavy
+content it suppresses hallucinated lyrics and runs ~3x faster. Every one of the
+six clips VAD reduced to zero was verified to be song lyrics in the baseline
+arm (e.g. "I'm so ATL, I'm so ATL, I'm so ATL", "Craving me was useless").
+
+A single 90%-music clip demonstrates the failure mode VAD fixes: baseline
+produced 95 words of Taylor Swift lyrics; the *stored production transcript*
+for that same clip is `"Thank you for watching this video! If you liked it,
+please subscribe to my channel..."` — a canonical Whisper hallucination. There
+are 11,093 transcripts with `song_lyrics_ratio >= 0.2` and 8,942 with
+`word_count < 10`; a share of both is likely this artifact.
+
+**Open follow-up:** the `demucs` arm (vocal isolation before VAD) is
+implemented and its dependencies installed, but not yet run. Worth testing on
+`music_heavy` specifically — VAD rejects music wholesale, whereas separation
+could recover speech that is *mixed with* music rather than absent.
+
+**Consequence for existing data:** the 78,604 stored transcripts were produced
+without VAD. Any analysis sensitive to transcript noise should either filter on
+`song_lyrics_ratio` or re-transcribe the affected strata via
+`scripts/retranscribe.py`.
+
+---
+
+## 2026-07-29 — Two blocking Windows-era artifacts fixed
+
+Both would have silently broken any audio work:
+
+1. **`videos.audio_path` used Windows backslashes** in all 79,369 rows
+   (`data\audio\...`). Zero resolved on Linux; all resolved after `\` -> `/`.
+   Normalized in place with an `UPDATE`. Re-transcription, the audio
+   experiment, and anything touching audio files were all dead before this.
+2. **`.mcp.json` pointed the `db` MCP server at port 5433** — the same stale
+   port as the `.env` files. That is why the database MCP never worked.
+
+See also the port/collation entries under Environment notes.
+
+---
+
+## 2026-07-29 — SECURITY: Postgres password was published to a public repo
+
+`.mcp.json` was git-tracked and pushed to `github.com/leakydata/tiktok_disorders`
+(public) containing a plaintext DSN with the `postgres` password. Verified
+present in the `origin/main` tree, not merely local.
+
+`.env` is **not** tracked, so the Anthropic / DeepSeek / HuggingFace keys were
+not exposed.
+
+Mitigated so far: `.mcp.json` now reads `${DATABASE_URL}`, has been
+`git rm --cached`ed, and is in `.gitignore`. **Not yet done, and required:**
+the password remains recoverable from git history, so it must be **rotated**
+(then updated in both projects' `.env`). Removing the file does not remove
+history; scrubbing history would need a force-push over the public repo.
+
+---
+
+## 2026-07-29 — CUDA runtime was missing for GPU transcription
+
+CTranslate2 `dlopen()`s `libcublas.so.12` / `libcudnn` by soname, and neither
+existed on this machine — GPU transcription failed outright with
+`Library libcublas.so.12 is not found`. Installed `nvidia-cublas-cu12` and
+`nvidia-cudnn-cu12`, which place the libraries under
+`site-packages/nvidia/*/lib` — a path the dynamic loader does not search.
+
+Rather than requiring `LD_LIBRARY_PATH` at every invocation,
+`transcriber._preload_cuda_libraries()` loads them with `RTLD_GLOBAL` at import
+time, so the later `dlopen` resolves against the already-loaded copies. GPU
+transcription now works from a bare `uv run` with no environment setup.
+
+---
+
 ## Project layout
 
 Two repositories share one PostgreSQL database (`tiktok_disorders`, port 5432).
