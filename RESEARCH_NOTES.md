@@ -229,10 +229,24 @@ The one genuine incompatibility: Haiku ran via the Anthropic **Batch API**, so
 (Table 5). That justifies its absence from Table 5 only, not from the stability
 and cross-model consensus tables.
 
-**Open decision:** include it (recompute Tables 1/4 and Figures 4/5/6 at N=4),
-or document a real methodological exclusion rationale in §3.3. Leaving it
-silently absent is not viable if `outputs/` is released, because Haiku appears
-in `outputs/experiment_14/cross_model_agreement_matrix.csv`.
+**RESOLVED 2026-07-29: included.** The manuscript now reports nine LLMs / four
+cloud models / 54,282 inferences. Tables 1 and 4 recomputed, Figures 4/5/6
+regenerated, prose updated throughout.
+
+The analysis pipeline had in fact *always* included Haiku — it appears in
+`outputs/experiment_14/cross_model_agreement_matrix.csv`. Only the manuscript's
+hand-written tables omitted it, so no re-inference was needed.
+
+Including it improved the paper's weakest result. Agency/control cross-model
+alpha moved from 0.08 [-0.01, 0.16] (interval spanning zero — no reliable
+boundary alignment claimable) to **0.20 [0.11, 0.29]**, bounded away from zero.
+Certainty/hedging rose 0.69 -> 0.73 and symptom concreteness 0.60 -> 0.63. The
+"local models outperform cloud APIs" claim survives (0.87 vs 0.81) with a
+narrower margin. Unanimity rates fell as expected — 4/4 agreement is a stricter
+bar than 3/3.
+
+Haiku is excluded from Table 5 (timing/cost) only, because Batch API runs
+logged `processing_time_ms` as 0. This is stated in §3.3.
 
 ---
 
