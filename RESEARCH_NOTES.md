@@ -10,6 +10,142 @@ of a finding, not just the finding.
 
 ---
 
+## 2026-07-29 — Extraction provider benchmark (measured, not estimated)
+
+All four candidates run against the **same** combined-extraction system prompt
+(14,943 chars / ~3,735 tokens) and the same transcript, `temperature=0`:
+
+| provider / model | latency | valid JSON | prompt tok | completion tok | reasoning tok |
+|---|---|---|---|---|---|
+| **MiniMax-M3** | **4.9s** | yes | 3,907 | **486** | **0** |
+| MiniMax-M2.7-highspeed | 12.5s | yes | 3,751 | 736 | 505 |
+| deepseek-v4-flash | 20.1s | yes | 3,950 | 2,274 | 1,200 |
+| deepseek-v4-pro | 57.1s | **no** (truncated) | 3,950 | 4,096 (capped) | 3,260 |
+| local gemma4:31b (Ollama) | **>10 min** | — | — | — | — |
+
+**MiniMax-M3 is the clear choice** and is now the configured default
+(`MINIMAX_MODEL`). It emits **zero reasoning tokens** on this task, making it
+both fastest and ~4.7x cheaper on output than deepseek-v4-flash. For structured
+extraction, reasoning is pure overhead — v4-pro spent 3,260 tokens thinking,
+hit the token cap mid-JSON, and returned unparseable output.
+
+**Local inference is not competitive here, and the reason is concurrency, not
+per-call speed.** `SymptomExtractor.max_workers = 20`, but gemma4:31b occupies
+29GB of 32GB total VRAM, so Ollama serializes all 20 workers through one model
+instance. A single local extraction did not complete in 10 minutes. Across
+6,923 transcripts that is roughly: **MiniMax ~30 min, DeepSeek ~2 h, local
+~1 month.** Do not assume "local is free" implies "local is cheap" — wall-clock
+is the binding constraint. A smaller model (phi4 at 9GB) could run 2-3 in
+parallel if local inference is ever required.
+
+### Provider inventory (verified live, 2026-07-29)
+
+| provider | status | models actually served |
+|---|---|---|
+| MiniMax | working, credit available | `MiniMax-M3`, `MiniMax-M2.7`, `MiniMax-M2.7-highspeed`, `MiniMax-M2.5`, `MiniMax-Text-01` |
+| DeepSeek | **$18.71** remaining | `deepseek-v4-flash`, `deepseek-v4-pro` |
+| OpenAI | key valid, 129 models | — |
+| Anthropic | key set (extracted the existing corpus) | — |
+
+**`deepseek-chat` and `deepseek-reasoner` no longer exist.** `config.py` still
+defaults `DEEPSEEK_MODEL` to `deepseek-chat`, so any DeepSeek run must pass
+`--model deepseek-v4-flash` explicitly or it will fail. Left as-is rather than
+silently repointing a documented default.
+
+Balances are only checkable programmatically for DeepSeek
+(`GET https://api.deepseek.com/user/balance`). MiniMax, OpenAI and Anthropic
+expose no balance endpoint — check their dashboards.
+
+---
+
+## 2026-07-29 — Combined extraction was broken for every Ollama model
+
+`_call_model` passed the `system` prompt to Anthropic (as a cached system
+block) and to DeepSeek (as a system role message), but the **Ollama branch
+silently dropped it**. Local models therefore received only
+`TRANSCRIPT: <text>` with no schema and no instruction to emit JSON, replied
+with prose, and every extraction failed with
+`Expecting value: line 1 column 1 (char 0)`.
+
+This was never noticed because the existing corpus was extracted through the
+Anthropic API. It surfaced only when gemma4 was tried locally.
+
+Fixes in `extractor.py`:
+
+1. System prompt now sent as a `system` role message for Ollama.
+2. `"format": "json"` added to the Ollama request so decoding is constrained —
+   fenced or prose-wrapped answers cannot reach the parser at all.
+3. `num_ctx` / `num_predict` were **hardcoded to 65536 / 12288**. A 64K KV cache
+   pushes a large model off the GPU entirely (gemma4:31b spills ~89% to CPU at
+   32K on a 24GB card) with no error explaining the slowdown. Now overridable
+   via `OLLAMA_NUM_CTX` / `OLLAMA_NUM_PREDICT`; defaults unchanged. Sizing
+   guide: unextracted transcripts average 76 words, p99 826 words, so 16384 is
+   ample. `num_predict` must stay below `num_ctx`.
+4. `supports_native_thinking` added for models using Ollama's top-level `think`
+   field (gemma4, gpt-oss, glm-4.7) rather than Qwen3's `/think` prefixes.
+   Note that suppressing thought is a **throughput** lever only — the cost is
+   generating the tokens, so discarding them afterwards saves nothing.
+
+**MiniMax provider support added** (`config.py`, `extractor.py`,
+`pipeline.py`). It is OpenAI-compatible, so it shares DeepSeek's code path.
+
+---
+
+## 2026-07-29 — The song filter is what keeps the symptom set clean
+
+| band | transcripts | symptoms | diagnoses |
+|---|---|---|---|
+| speech (<0.2) | 44,880 | **93,972** | **23,662** |
+| unscored | 22,847 | 0 | 0 |
+| music_heavy (>=0.5) | 10,895 | 0 | 0 |
+| music_some (0.2-0.5) | 198 | 0 | 0 |
+
+**Every symptom and diagnosis in the database came from a scored clean-speech
+transcript.** `--max-song-ratio` quarantined the contaminated ones before
+extraction, so the hallucinated song lyrics documented above never polluted a
+single result.
+
+**This property is fragile.** The extraction filter is
+`(song_lyrics_ratio IS NULL OR song_lyrics_ratio < %s)` — **NULL passes**. So
+scoring is not a prerequisite for extraction to *run*; it is the quality gate
+that stops unscored music being extracted as if it were speech. Of the 6,923
+currently eligible transcripts, ~6,661 are unscored. Always run
+`scripts/detect_song_lyrics.py` before an extraction pass.
+
+Also worth revisiting: **18,112 transcripts are excluded as "too short"
+(<20 words)**. Given what VAD revealed about hallucination, some of those are
+likely near-empty garbage rather than genuinely short videos.
+
+---
+
+## 2026-07-29 — Two more Windows-era artifacts
+
+1. **`.env` had CRLF line terminators.** `python-dotenv` strips them so the
+   pipeline was unaffected, but any shell-based read (`grep | cut`) yields a
+   trailing `\r` that corrupts HTTP headers. Normalized to LF.
+2. **`tiktok_research/.venv` was a Windows venv** (`Lib/`, `Scripts/`), like
+   the one in this repo. Rebuilt with `uv sync --no-install-project` — the
+   plain `uv sync` fails because setuptools cannot auto-discover packages in
+   that flat layout.
+
+**Credential exposure:** the DeepSeek API key was printed in full in a terminal
+error during this session and should be rotated, alongside the still-unrotated
+Postgres password.
+
+---
+
+## 2026-07-29 — Environment additions
+
+- **pgAdmin 4 v9.16** installed from the official pgAdmin APT repo (Ubuntu
+  26.04 "resolute" is supported upstream). Launch: `/usr/pgadmin4/bin/pgadmin4`.
+  The snap was deliberately avoided — it is published by an individual, not the
+  pgAdmin project. Connect on **port 5432**.
+- **Transcription backlog cleared**: all 765 previously untranscribed videos are
+  done. These are the first VAD-processed transcripts, so the corpus now
+  contains two preprocessing regimes — distinguishable via `transcribed_at`.
+
+---
+
 ## 2026-07-29 — VAD enabled; measured effect on transcription quality
 
 `vad_filter` (Silero) is now **on by default** for the faster-whisper path,
@@ -100,7 +236,7 @@ transcription now works from a bare `uv run` with no environment setup.
 
 ---
 
-## Project layout
+## Reference: project layout
 
 Two repositories share one PostgreSQL database (`tiktok_disorders`, port 5432).
 Table ownership is disjoint — verified by grep over both codebases:
@@ -203,7 +339,7 @@ detectable.
 
 ---
 
-## 2026-07-29 — Unreported model in experiment 14 (open decision)
+## 2026-07-29 — Unreported model in experiment 14 (RESOLVED: included)
 
 `experiment_14` contains **four** complete cloud models, all on prompt version
 v1, each with a full 6,000-run grid (100 chunks x 6 constructs x 2 temps x 5 runs):
@@ -281,7 +417,7 @@ disclosure; a journal reviewer will require it.
 
 ---
 
-## Environment notes
+## Reference: environment fixes
 
 Things that broke and how they were fixed, so they are not re-diagnosed:
 
