@@ -67,6 +67,9 @@ def main():
     p.add_argument('--out', required=True)
     p.add_argument('--min-symptoms', type=int, default=2)
     p.add_argument('--min-views', type=int, default=0)
+    p.add_argument('--no-repeat', action='store_true',
+                   help='Never reuse the same video moment twice; repeated '
+                        'lyric lines get a different clip')
     p.add_argument('--exclude-creator', action='append', default=[],
                    help='Creator to skip (repeatable)')
     args = p.parse_args()
@@ -105,6 +108,29 @@ def main():
             r.setdefault('match_quality', 'strong')
             best[key] = r
 
+    # A repeated lyric (chorus lines, refrains) resolves to the same best match
+    # every time, producing byte-identical clips. With --no-repeat the later
+    # occurrences are re-queried and forced onto a different moment.
+    used_moments = set()
+    if args.no_repeat:
+        dropped_dupes = []
+        for s, l in lyrics:
+            r = best.get((s, l))
+            if not r:
+                continue
+            moment = (r['url'], str(r['clip_start_s']))
+            if moment in used_moments:
+                dropped_dupes.append((s, l, r['creator']))
+                del best[(s, l)]
+            else:
+                used_moments.add(moment)
+        if dropped_dupes:
+            print(f"Re-querying {len(dropped_dupes)} repeated lyric line(s) to "
+                  f"avoid identical clips:")
+            for s, l, c in dropped_dupes:
+                print(f"    [{s}] \"{l[:44]}\" (was @{c})")
+            print()
+
     missing = [(s, l) for s, l in lyrics if (s, l) not in best]
     print(f"{len(lyrics)} lyric line(s): {len(best)} covered, "
           f"{len(missing)} to backfill\n")
@@ -136,6 +162,11 @@ def main():
                     for r in cur.fetchall():
                         if (r['author'] or '').lower().lstrip('@') in excl:
                             continue
+                        if args.no_repeat:
+                            moment = (r['url'], str(round(float(r['start_s']), 2)))
+                            if moment in used_moments:
+                                continue
+                            used_moments.add(moment)
                         found = (r, ceiling); break
                     if found:
                         break

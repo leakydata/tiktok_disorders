@@ -120,7 +120,14 @@ def cmd_check(args):
         if args.creator:
             where.append("v.author ILIKE %s"); params.append(args.creator)
         if not args.recheck:
+            # Already-checked videos are skipped, so results persist in the
+            # database across runs and nothing is ever re-fetched needlessly.
             where.append("v.permissions_checked_at IS NULL")
+        if args.embedded_only:
+            # Only videos with segment embeddings can be selected for a
+            # montage, so checking anything else spends requests for nothing.
+            where.append("EXISTS (SELECT 1 FROM segment_embeddings se "
+                         "WHERE se.video_id = v.id)")
         sql = (f"SELECT v.id, v.url, v.author FROM videos v "
                f"WHERE {' AND '.join(where)} "
                f"ORDER BY v.view_count DESC NULLS LAST")
@@ -217,6 +224,9 @@ def main():
     c = sub.add_parser('check', help='Fetch permissions for videos')
     c.add_argument('--creator'); c.add_argument('--limit', type=int)
     c.add_argument('--from-csv', help='Check only URLs appearing in this CSV')
+    c.add_argument('--embedded-only', action='store_true',
+                   help='Only check videos that have segment embeddings, i.e. '
+                        'those actually usable for clip matching')
     c.add_argument('--recheck', action='store_true',
                    help='Re-check videos already checked')
     c.add_argument('--min-delay', type=float, default=1.5)
