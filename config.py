@@ -29,6 +29,33 @@ MINIMAX_MODEL = os.getenv('MINIMAX_MODEL', 'MiniMax-M3')
 MINIMAX_URL = os.getenv('MINIMAX_URL', 'https://api.minimax.io/v1')
 OLLAMA_URL = os.getenv('OLLAMA_URL', 'http://localhost:11434')
 OLLAMA_MODEL = os.getenv('OLLAMA_MODEL', 'gpt-oss:20b')
+
+# llama.cpp server (llama-server). Despite also serving gpt-oss, this is NOT
+# Ollama: it speaks the OpenAI wire format and has no /api/generate, /api/chat
+# or /api/tags. The base URL therefore includes /v1 and the OpenAI SDK is used.
+LLAMACPP_URL = os.getenv('LLAMACPP_URL', 'http://127.0.0.1:8081/v1')
+LLAMACPP_MODEL = os.getenv('LLAMACPP_MODEL', 'gpt-oss-120b')
+# No auth, but the OpenAI SDK refuses to construct without some key.
+LLAMACPP_API_KEY = os.getenv('LLAMACPP_API_KEY', 'no-key-required')
+# gpt-oss reasons before answering and those tokens are billed against
+# max_tokens. Measured on this box for a classification prompt: "low" 72
+# completion tokens / 9.7s vs "high" 568 / 93.6s for the same answer. The
+# reasoning is pure overhead for structured extraction, so "low" is the default.
+LLAMACPP_REASONING_EFFORT = os.getenv('LLAMACPP_REASONING_EFFORT', 'low')
+# Max concurrent requests. The server exposes 4 slots, but slots are not free
+# throughput: this model is launched with --n-cpu-moe 26, so 59GB of weights do
+# not fit the 24GB card and the MoE layers run on CPU across --threads 20.
+# Concurrent requests then contend for one saturated memory-bandwidth path.
+# Measured on the same 4 transcripts: serial 278.8s vs 4-way 330.9s -- batching
+# was 19% SLOWER, with per-request latency rising 69.7s -> 294.2s.
+#
+# So serial is the default. Raise this only if the model is ever fully resident
+# on the GPU (drop --n-cpu-moe, or use a smaller quant), where the slots would
+# genuinely parallelise.
+LLAMACPP_CONCURRENCY = int(os.getenv('LLAMACPP_CONCURRENCY', '1'))
+# Each slot gets its own 32k context; leave room for the transcript + prompt.
+LLAMACPP_MAX_TOKENS = int(os.getenv('LLAMACPP_MAX_TOKENS', '8192'))
+
 HF_TOKEN = os.getenv('HF_TOKEN')
 
 # Set HF_TOKEN in environment for huggingface_hub to find it
@@ -85,9 +112,11 @@ def validate_config():
     """Validate required configuration is present."""
     errors = []
 
-    if EXTRACTOR_PROVIDER not in {'anthropic', 'ollama', 'deepseek', 'minimax'}:
+    if EXTRACTOR_PROVIDER not in {'anthropic', 'ollama', 'deepseek', 'minimax',
+                                  'llamacpp'}:
         errors.append(
-            "EXTRACTOR_PROVIDER must be 'anthropic', 'ollama', 'deepseek', or 'minimax'")
+            "EXTRACTOR_PROVIDER must be 'anthropic', 'ollama', 'deepseek', "
+            "'minimax', or 'llamacpp'")
 
     if EXTRACTOR_PROVIDER == 'minimax' and not MINIMAX_API_KEY:
         errors.append("MINIMAX_API_KEY is not set")

@@ -19,6 +19,12 @@ from config import (
     MINIMAX_API_KEY,
     MINIMAX_MODEL,
     MINIMAX_URL,
+    LLAMACPP_API_KEY,
+    LLAMACPP_MAX_TOKENS,
+    LLAMACPP_MODEL,
+    LLAMACPP_REASONING_EFFORT,
+    LLAMACPP_CONCURRENCY,
+    LLAMACPP_URL,
     EXTRACTOR_PROVIDER,
     MIN_CONFIDENCE_SCORE,
     OLLAMA_MODEL,
@@ -375,6 +381,149 @@ SYMPTOM_CATEGORIES = {
 }
 
 
+# Single source of truth for the diagnosis vocabulary. Used both to render the
+# prompt text and to build the JSON schema below -- if these drifted apart, a
+# grammar-constrained model would be unable to emit what the prompt asked for.
+CONDITION_CODES = (
+    "EDS", "MCAS", "POTS", "DYSAUTONOMIA", "IST", "ME_CFS", "FIBROMYALGIA",
+    "CHIARI", "CCI_AAI", "TETHERED_CORD", "GASTROPARESIS", "SIBO", "CIRS",
+    "LONG_COVID", "AUTOIMMUNE", "SFN", "ENDOMETRIOSIS",
+    "INTERSTITIAL_CYSTITIS", "OTHER",
+)
+
+SEVERITIES = ("mild", "moderate", "severe", "unspecified")
+TEMPORAL_PATTERNS = ("acute", "chronic", "intermittent", "progressive", "unspecified")
+DIAGNOSIS_STATUSES = ("confirmed", "self_diagnosed", "suspected", "clinical",
+                      "genetic", "seeking", "lost", "unclear")
+EDS_SUBTYPES = ("hEDS", "vEDS", "cEDS", "clEDS", "kEDS", "HSD")
+DIAGNOSIS_SENTIMENTS = ("validated", "frustrated", "relieved", "questioning", "neutral")
+TREATMENT_TYPES = ("medication", "supplement", "therapy", "lifestyle",
+                   "procedure", "device", "other")
+EFFECTIVENESS = ("very_helpful", "somewhat_helpful", "not_helpful",
+                 "made_worse", "unspecified")
+CONTENT_TYPES = ("personal_story", "educational", "advice_giving",
+                 "awareness_advocacy", "product_promotion", "vent_rant", "other")
+
+# Narrative flags are tri-state: true, false, or null when the transcript says
+# nothing either way. insert_narrative_elements stores all three distinctly.
+_NARRATIVE_FLAGS = (
+    "mentions_self_diagnosis", "mentions_professional_diagnosis",
+    "mentions_negative_testing", "mentions_doctor_dismissal",
+    "mentions_medical_gaslighting", "mentions_long_diagnostic_journey",
+    "mentions_multiple_doctors", "mentions_stress_triggers",
+    "mentions_symptom_flares", "mentions_symptom_migration",
+    "mentions_online_community", "mentions_other_creators",
+    "mentions_learning_from_tiktok", "cites_medical_sources",
+    "claims_healthcare_background", "claims_expert_knowledge",
+    "uses_condition_as_identity", "mentions_chronic_illness_community",
+)
+
+
+def _nullable(*types):
+    """A JSON Schema type union that permits null."""
+    return {"type": [*types, "null"]}
+
+
+def _enum_or_null(values):
+    return {"type": ["string", "null"], "enum": [*values, None]}
+
+
+def build_combined_extraction_schema() -> Dict[str, Any]:
+    """JSON Schema for the combined extraction response.
+
+    llama.cpp compiles this to a GBNF grammar and constrains the sampler, so the
+    model cannot emit malformed JSON, an unknown symptom category, or an invented
+    condition code -- those tokens are simply not reachable. This is stricter
+    than any post-hoc validation the pipeline does for the other providers.
+
+    Only the fields the pipeline actually dereferences are marked required;
+    everything else stays optional so the song-lyrics short-circuit response
+    (`{"is_song_lyrics": true, ...}`) remains legal.
+    """
+    symptom = {
+        "type": "object",
+        "properties": {
+            "symptom": {"type": "string"},
+            "category": {"type": "string", "enum": list(SYMPTOM_CATEGORIES)},
+            "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+            "severity": {"type": "string", "enum": list(SEVERITIES)},
+            "temporal_pattern": {"type": "string", "enum": list(TEMPORAL_PATTERNS)},
+            "body_location": _nullable("string"),
+            "triggers": {"type": "array", "items": {"type": "string"}},
+            "is_personal_experience": {"type": "boolean"},
+            "context": {"type": "string"},
+        },
+        # symptom/category/confidence are read unconditionally downstream.
+        "required": ["symptom", "category", "confidence"],
+        "additionalProperties": False,
+    }
+
+    diagnosis = {
+        "type": "object",
+        "properties": {
+            "condition_code": {"type": "string", "enum": list(CONDITION_CODES)},
+            "condition_name": {"type": "string"},
+            "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+            "diagnosis_status": {"type": "string", "enum": list(DIAGNOSIS_STATUSES)},
+            "eds_subtype": _enum_or_null(EDS_SUBTYPES),
+            "diagnosis_date_mentioned": _nullable("string"),
+            "diagnosing_specialty": _nullable("string"),
+            "sentiment": {"type": "string", "enum": list(DIAGNOSIS_SENTIMENTS)},
+            "mentioned_with": {"type": "array",
+                               "items": {"type": "string",
+                                         "enum": list(CONDITION_CODES)}},
+            "context": {"type": "string"},
+        },
+        "required": ["condition_code", "condition_name", "confidence"],
+        "additionalProperties": False,
+    }
+
+    treatment = {
+        "type": "object",
+        "properties": {
+            "treatment_type": {"type": "string", "enum": list(TREATMENT_TYPES)},
+            "treatment_name": {"type": "string"},
+            "dosage": _nullable("string"),
+            "frequency": _nullable("string"),
+            "effectiveness": {"type": "string", "enum": list(EFFECTIVENESS)},
+            "side_effects": {"type": "array", "items": {"type": "string"}},
+            "is_current": _nullable("boolean"),
+            "target_condition": _nullable("string"),
+            "target_symptoms": {"type": "array", "items": {"type": "string"}},
+            "context": {"type": "string"},
+            "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+        },
+        "required": ["treatment_type", "treatment_name", "confidence"],
+        "additionalProperties": False,
+    }
+
+    narrative_props = {
+        "content_type": {"type": "string", "enum": list(CONTENT_TYPES)},
+        "years_to_diagnosis_mentioned": _nullable("number"),
+        "diagnostic_journey_quotes": {"type": "array", "maxItems": 3,
+                                      "items": {"type": "string"}},
+        "stress_trigger_quotes": {"type": "array", "maxItems": 3,
+                                  "items": {"type": "string"}},
+    }
+    for flag in _NARRATIVE_FLAGS:
+        narrative_props[flag] = _nullable("boolean")
+
+    return {
+        "type": "object",
+        "properties": {
+            "is_song_lyrics": {"type": "boolean"},
+            "symptoms": {"type": "array", "items": symptom},
+            "diagnoses": {"type": "array", "items": diagnosis},
+            "treatments": {"type": "array", "items": treatment},
+            "narrative": {"type": "object", "properties": narrative_props,
+                          "additionalProperties": False},
+        },
+        "required": ["is_song_lyrics", "symptoms", "diagnoses", "treatments",
+                     "narrative"],
+        "additionalProperties": False,
+    }
+
+
 
 class SymptomExtractor:
     """Extracts symptoms from transcripts using Claude or Ollama.
@@ -411,9 +560,10 @@ class SymptomExtractor:
         self.provider = (provider or EXTRACTOR_PROVIDER).lower()
         self.max_song_ratio = max_song_ratio
         self.enable_thinking = enable_thinking
-        if self.provider not in {"anthropic", "ollama", "deepseek", "minimax"}:
-            raise ValueError(
-                "provider must be 'anthropic', 'ollama', 'deepseek', or 'minimax'")
+        if self.provider not in {"anthropic", "ollama", "deepseek", "minimax",
+                                 "llamacpp"}:
+            raise ValueError("provider must be 'anthropic', 'ollama', "
+                             "'deepseek', 'minimax', or 'llamacpp'")
 
         # Set up model and API key based on provider
         if self.provider == "anthropic":
@@ -439,6 +589,13 @@ class SymptomExtractor:
                 raise ValueError("MINIMAX_API_KEY is required for MiniMax")
             # OpenAI-compatible endpoint, so the same SDK works.
             self.client = OpenAI(api_key=self.api_key, base_url=MINIMAX_URL)
+        elif self.provider == "llamacpp":
+            # llama-server speaks OpenAI, not Ollama -- /api/chat does not exist
+            # here. Local and unauthenticated, so no key check.
+            self.api_key = api_key or LLAMACPP_API_KEY
+            self.model = model or LLAMACPP_MODEL
+            self.client = OpenAI(api_key=self.api_key, base_url=LLAMACPP_URL,
+                                 timeout=900.0, max_retries=2)
         else:  # ollama
             self.api_key = None
             self.model = model or OLLAMA_MODEL
@@ -446,6 +603,15 @@ class SymptomExtractor:
         
         self.ollama_url = (ollama_url or OLLAMA_URL).rstrip("/")
         self.use_combined_extraction = use_combined_extraction
+
+        # A local llama-server has no elastic capacity: extra workers contend for
+        # the same weights rather than adding throughput. With this model's MoE
+        # layers on CPU, measured 4-way concurrency was slower than serial, so
+        # the pool is capped hard (see LLAMACPP_CONCURRENCY for the numbers).
+        if self.provider == "llamacpp" and max_workers > LLAMACPP_CONCURRENCY:
+            print(f"[i] Capping workers {max_workers} -> {LLAMACPP_CONCURRENCY} "
+                  f"(local server; set LLAMACPP_CONCURRENCY to override)")
+            max_workers = LLAMACPP_CONCURRENCY
         self.max_workers = max_workers
         
         # Detect model capabilities
@@ -465,14 +631,18 @@ class SymptomExtractor:
         
         # High-capability models get longer timeouts and combined extraction
         # All API providers (anthropic, deepseek) are high-capability
-        self.is_high_capability = self.provider in {'anthropic', 'deepseek', 'minimax'} or any(x in model_lower for x in [
+        self.is_high_capability = self.provider in {'anthropic', 'deepseek', 'minimax', 'llamacpp'} or any(x in model_lower for x in [
             'gpt-oss', 'qwen', 'llama3', 'llama-3', 'mixtral', 'medgemma',
             'gemma', 'phi', 'glm', 'deepseek', 'yi', 'mistral', 'command-r',
             'claude', 'gpt-4', 'wizard', 'solar', 'nous', 'dolphin',
             ':20b', ':27b', ':32b', ':34b', ':70b', ':72b', ':120b',  # Size-based detection
         ])
         
-        if self.is_deepseek:
+        if self.provider == 'llamacpp':
+            print(f"[OK] llama.cpp server: {self.model} @ {LLAMACPP_URL}")
+            print(f"    Grammar-constrained JSON, reasoning_effort="
+                  f"{LLAMACPP_REASONING_EFFORT}, {self.max_workers} concurrent")
+        elif self.is_deepseek:
             if self.is_deepseek_reasoner:
                 print(f"[OK] DeepSeek Reasoner detected: {self.model}")
                 print(f"    Deep reasoning model with chain-of-thought")
@@ -1045,11 +1215,9 @@ Return ONLY the JSON object, no additional text."""
         first call, saving ~75% on instruction tokens for every subsequent call).
         """
         categories_str = "\n".join([f"- {cat}: {desc}" for cat, desc in SYMPTOM_CATEGORIES.items()])
-        condition_codes = (
-            "EDS, MCAS, POTS, DYSAUTONOMIA, IST, ME_CFS, FIBROMYALGIA, CHIARI, CCI_AAI, "
-            "TETHERED_CORD, GASTROPARESIS, SIBO, CIRS, LONG_COVID, AUTOIMMUNE, SFN, "
-            "ENDOMETRIOSIS, INTERSTITIAL_CYSTITIS, or OTHER"
-        )
+        # Rendered from CONDITION_CODES so the prompt and the JSON schema can
+        # never disagree about the permitted vocabulary.
+        condition_codes = ", ".join(CONDITION_CODES[:-1]) + f", or {CONDITION_CODES[-1]}"
         return f"""You are a medical research assistant analyzing TikTok content about chronic illnesses for the STRAIN research framework.
 
 IMPORTANT FIRST CHECK: Before extracting any data, determine if this transcript is primarily SONG LYRICS rather than spoken content.
@@ -1328,7 +1496,10 @@ Return ONLY the JSON object, no additional text."""
         user_prompt = f"TRANSCRIPT:\n{transcript_text}"
 
         try:
-            response_text = self._call_model(user_prompt, system=system_prompt)
+            response_text = self._call_model(
+                user_prompt, system=system_prompt,
+                json_schema=build_combined_extraction_schema()
+                if self.provider == 'llamacpp' else None)
             data = _parse_json_safely(response_text)
             return self._process_combined_response(data, video_id, transcript_data, min_conf)
 
@@ -1556,7 +1727,8 @@ Return ONLY the JSON object, no additional text."""
         }
 
     def _call_model(self, prompt: str, system: Optional[str] = None,
-                    force_thinking: bool = False) -> str:
+                    force_thinking: bool = False,
+                    json_schema: Optional[Dict[str, Any]] = None) -> str:
         """
         Call the LLM with the given prompt.
 
@@ -1566,10 +1738,59 @@ Return ONLY the JSON object, no additional text."""
                     parameter with cache_control so it is cached across calls (saves ~75%
                     on instruction tokens). For DeepSeek, passed as the system role message.
             force_thinking: Override default and use /think mode (for complex cases)
+            json_schema: Optional JSON Schema describing the expected response.
+                    Only the llamacpp provider uses it, where it becomes a sampler
+                    grammar and makes an invalid response unrepresentable. Ignored
+                    by the hosted providers, which keep their existing behaviour.
 
         Returns:
             Model response text
         """
+        if self.provider == "llamacpp":
+            messages = []
+            if system:
+                messages.append({"role": "system", "content": system})
+            messages.append({"role": "user", "content": prompt})
+
+            # llama.cpp compiles the schema to GBNF and constrains decoding, so
+            # the response is valid JSON of the right shape by construction --
+            # there is nothing for a repair pass to fix. Without a schema, fall
+            # back to the generic JSON grammar, which still rules out prose and
+            # markdown fences.
+            if json_schema is not None:
+                response_format = {
+                    "type": "json_schema",
+                    "json_schema": {"name": "extraction", "strict": True,
+                                    "schema": json_schema},
+                }
+            else:
+                response_format = {"type": "json_object"}
+
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                max_tokens=LLAMACPP_MAX_TOKENS,
+                temperature=0.0,
+                response_format=response_format,
+                # gpt-oss reasons before answering and those tokens count
+                # against max_tokens. The chat template accepts reasoning_effort
+                # as a kwarg; "low" cuts completion tokens several-fold with no
+                # loss on structured extraction. Reasoning is returned in a
+                # separate reasoning_content field, so `content` is already
+                # clean and needs no stripping.
+                extra_body={"chat_template_kwargs": {
+                    "reasoning_effort": LLAMACPP_REASONING_EFFORT}},
+            )
+            content = response.choices[0].message.content
+            if not content:
+                # Almost always max_tokens exhaustion mid-object; the grammar
+                # guarantees shape, not that generation had room to finish.
+                raise ValueError(
+                    f"llama.cpp returned empty content "
+                    f"(finish_reason={response.choices[0].finish_reason}). "
+                    f"Raise LLAMACPP_MAX_TOKENS if this is 'length'.")
+            return content.strip()
+
         if self.provider == "anthropic":
             kwargs: Dict[str, Any] = {
                 "model": self.model,

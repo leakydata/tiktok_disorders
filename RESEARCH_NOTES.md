@@ -10,6 +10,81 @@ of a finding, not just the finding.
 
 ---
 
+## 2026-07-30 — llama.cpp provider: grammar-constrained extraction, but serial
+
+Added `llamacpp` as a fifth extractor provider (`EXTRACTOR_PROVIDER=llamacpp`).
+Local `llama-server` running **gpt-oss-120b** (MXFP4, 59GB) on port 8081.
+
+**It is not Ollama.** Despite serving the same model family, llama-server speaks
+the OpenAI wire format: `/v1/chat/completions`, no `/api/generate`, `/api/chat`
+or `/api/tags` (all 404). Hence `LLAMACPP_URL` includes `/v1` and the provider
+reuses the OpenAI SDK rather than the Ollama branch.
+
+### Constrained decoding is the reason to use it
+
+llama.cpp compiles a JSON Schema to a GBNF grammar and constrains the *sampler*,
+so malformed output is unrepresentable rather than merely unlikely.
+`build_combined_extraction_schema()` in `extractor.py` enumerates all 37 symptom
+categories and 19 condition codes as schema enums, which means **an invented
+category cannot be sampled at all**. No other provider gets this guarantee.
+
+Two consequences worth remembering:
+
+- The combined path calls raw `json.loads`; `_parse_json_safely` is not used for
+  this provider. Repair logic is dead code against a grammar. It stays in place
+  for the other four providers, where nothing constrains output.
+- `CONDITION_CODES` is now a module constant that renders *both* the prompt text
+  and the schema enum. If those ever drifted, the grammar would forbid exactly
+  the vocabulary the prompt requested and every diagnosis would be lost.
+
+Verified: llama.cpp accepts an **array-root** schema, which the OpenAI API
+itself rejects. Several extraction prompts return bare JSON arrays, so this
+matters if the schema is extended to them.
+
+### reasoning_effort is a large, free speedup
+
+gpt-oss reasons before answering and those tokens bill against `max_tokens`.
+Passed via `extra_body={"chat_template_kwargs": {"reasoning_effort": ...}}`.
+Measured on an identical classification prompt with identical answers:
+
+| effort | completion tokens | wall |
+|--------|-------------------|------|
+| low    | 72                | 9.7s |
+| high   | 568               | 93.6s |
+
+**9.6×**, not the ~3.7× reported elsewhere. Default is `low`; the reasoning is
+pure overhead for schema-constrained extraction. Reasoning arrives in a separate
+`reasoning_content` field, so `content` needs no stripping.
+
+### Concurrency does NOT help here — the 4 slots are a trap
+
+The server reports `total_slots: 4`, each with its own 32k context, which looks
+like 4× throughput. It is not. Launch args are `--n-gpu-layers 99 --n-cpu-moe 26
+--threads 20`: 59GB of weights against a 24GB RTX 4090, so 26 MoE layers execute
+on CPU. Concurrent requests contend for one saturated memory-bandwidth path.
+
+Same 4 transcripts, measured both ways:
+
+| workers | wall | per-request avg | throughput |
+|---------|------|-----------------|------------|
+| 1 | 278.8s | 69.7s | 0.9/min |
+| 4 | 330.9s | 294.2s | 0.7/min |
+
+Batching was **19% slower**. `LLAMACPP_CONCURRENCY` therefore defaults to **1**
+and the constructor caps the worker pool. Raise it only if the model becomes
+fully GPU-resident (drop `--n-cpu-moe`, or use a smaller quant) — slot count
+alone is not evidence of parallelism.
+
+### Consequence for corpus-scale work
+
+~60–100s per transcript serially, i.e. **~1/min**. The ~20,000 unscored
+transcripts would take roughly two weeks. This provider is for local, private,
+or high-assurance extraction on subsets — **not** for full-corpus passes, where
+DeepSeek/MiniMax remain far faster. The quality argument (guaranteed valid
+categories) is the reason to reach for it, not speed.
+
+---
+
 ## 2026-07-29 — yt-dlp impersonation was silently disabled (TikTok blocks)
 
 `uv sync` resolved **curl-cffi 0.14.0**, but yt-dlp 2025.12.08 accepts only

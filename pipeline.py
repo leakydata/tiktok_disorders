@@ -710,6 +710,15 @@ def cmd_extract(args):
         print("Error: Provide --video-id, --user, or --all")
         return 1
 
+    # Applied after selection so it truncates whichever set was chosen, and so
+    # the counts printed above still describe the full backlog. Matters most for
+    # slow local providers, where --all is a multi-day run and a bounded trial
+    # is the only practical way to evaluate a model.
+    limit = getattr(args, 'limit', None)
+    if limit and len(video_ids) > limit:
+        print(f"Limiting to first {limit} of {len(video_ids)} video(s)")
+        video_ids = video_ids[:limit]
+
     # --- Anthropic Batch API: submit all video_ids as a batch and exit ---
     if getattr(args, 'batch', False):
         batch_ids = extractor.submit_anthropic_batch(video_ids)
@@ -952,7 +961,7 @@ Examples:
     run_parser.add_argument('--tags', nargs='+', default=['EDS', 'MCAS', 'POTS'], help='Tags for videos')
     run_parser.add_argument('--resume', type=int, help='Resume a previous run by ID')
     run_parser.add_argument('--whisper-model', default='large-v3', help='Whisper model size')
-    run_parser.add_argument('--provider', help='Extractor provider (anthropic, ollama, deepseek, or minimax)')
+    run_parser.add_argument('--provider', help='Extractor provider (anthropic, ollama, deepseek, minimax, or llamacpp)')
     run_parser.add_argument('--model', help='Extractor model name')
     run_parser.add_argument('--min-confidence', type=float, default=0.6, help='Min symptom confidence')
     run_parser.add_argument('--no-move-processed', action='store_true',
@@ -988,11 +997,14 @@ Examples:
     ex_parser.add_argument('--video-id', type=int, help='Single video database ID')
     ex_parser.add_argument('--all', action='store_true', help='Extract from all unprocessed transcripts')
     ex_parser.add_argument('--user', action='append', help='TikTok username(s) to extract from')
-    ex_parser.add_argument('--provider', help='Extractor provider (ollama, deepseek, minimax, or anthropic)')
+    ex_parser.add_argument('--provider', help='Extractor provider (ollama, deepseek, minimax, llamacpp, or anthropic)')
     ex_parser.add_argument('--require-scored', action='store_true',
                            help='Only extract transcripts that have already been '
                                 'song-detected. Without this, unscored transcripts '
                                 'pass the song filter and are extracted unchecked.')
+    ex_parser.add_argument('--limit', type=int, metavar='N',
+                           help='Extract at most N videos from the selected set. '
+                                'Useful for bounded trial runs on slow local providers.')
     ex_parser.add_argument('--model', help='Extractor model name')
     ex_parser.add_argument('--min-confidence', type=float, default=0.6, help='Min symptom confidence')
     ex_parser.add_argument('--no-parallel', action='store_true', help='Disable parallel extraction')
