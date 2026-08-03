@@ -303,8 +303,10 @@ When using `--urls-file`, URLs are automatically tracked:
 | `--max-song-ratio` | 0.2 | Skip videos with song_lyrics_ratio >= this |
 | `--min-words` | 20 | Skip transcripts with fewer words (uses cleaned word count) |
 | `--min-confidence` | 0.6 | Minimum confidence for symptoms |
-| `--provider` | ollama | LLM provider (ollama, deepseek, or anthropic) |
+| `--provider` | ollama | LLM provider (ollama, deepseek, minimax, llamacpp, or anthropic) |
 | `--model` | gpt-oss:20b | LLM model name |
+| `--limit` | - | Extract at most N videos from the selected set (bounded trial runs) |
+| `--require-scored` | - | Only extract transcripts already checked by song detection |
 | `--force` | - | Re-extract all videos (clears previous extraction status) |
 | `--thinking` | - | Enable Qwen3 `/think` mode for deeper reasoning (slower) |
 
@@ -786,7 +788,7 @@ Environment variables in `.env`:
 # Database
 DATABASE_URL=postgresql://user:pass@localhost/tiktok_disorders
 
-# Extraction (choose one: ollama, deepseek, or anthropic)
+# Extraction (choose one: ollama, deepseek, minimax, llamacpp, or anthropic)
 EXTRACTOR_PROVIDER=ollama
 OLLAMA_URL=http://localhost:11434
 OLLAMA_MODEL=gpt-oss:20b
@@ -795,6 +797,22 @@ OLLAMA_MODEL=gpt-oss:20b
 EXTRACTOR_PROVIDER=deepseek
 DEEPSEEK_API_KEY=sk-...
 DEEPSEEK_MODEL=deepseek-chat  # or deepseek-reasoner
+
+# Or use MiniMax (OpenAI-compatible cloud API)
+EXTRACTOR_PROVIDER=minimax
+MINIMAX_API_KEY=...
+MINIMAX_MODEL=MiniMax-M3
+MINIMAX_URL=https://api.minimax.io/v1
+
+# Or use a local llama.cpp server (see "Running with llama.cpp" below).
+# NOTE: this is NOT Ollama -- llama-server speaks the OpenAI wire format, so
+# the URL includes /v1 and there is no /api/chat endpoint.
+EXTRACTOR_PROVIDER=llamacpp
+LLAMACPP_URL=http://127.0.0.1:8081/v1
+LLAMACPP_MODEL=gpt-oss-120b
+LLAMACPP_REASONING_EFFORT=low  # low/medium/high; low is ~3.8x faster
+LLAMACPP_CONCURRENCY=1         # see note on parallel slots below
+LLAMACPP_MAX_TOKENS=8192
 
 # Or use Anthropic Claude
 EXTRACTOR_PROVIDER=anthropic
@@ -805,6 +823,11 @@ ANTHROPIC_MODEL=claude-sonnet-4-20250514
 WHISPER_MODEL=large-v3
 TRANSCRIBER_BACKEND=faster-whisper
 WHISPER_COMPUTE_TYPE=auto  # float16 for GPU, int8 for CPU
+
+# Voice activity detection (faster-whisper). Silero VAD drops non-speech before
+# decoding, suppressing hallucinated text over music. On by default.
+WHISPER_VAD=true
+WHISPER_VAD_THRESHOLD=0.5
 
 # Extraction thresholds
 MIN_CONFIDENCE_SCORE=0.6
