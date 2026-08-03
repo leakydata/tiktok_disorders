@@ -312,6 +312,24 @@ When using `--urls-file`, URLs are automatically tracked:
 
 **Note:** Videos are marked as "extracted" after processing (even if zero symptoms found). This prevents re-processing the same videos. Use `--force` to re-extract.
 
+**Note on `--require-scored`:** by default the song filter treats an *unscored*
+transcript as passing, because `NULL < 0.2` evaluates to unknown in SQL. That
+means transcripts never run through `detect_song_lyrics.py` are extracted
+without anyone knowing whether they are speech or song lyrics. `--require-scored`
+inverts this to fail-closed, restricting extraction to transcripts whose content
+has actually been checked. The command warns when unscored transcripts are about
+to be extracted unchecked.
+
+**Warning on `--force`:** clearing extraction status does *not* delete previously
+extracted symptom rows. Re-extracting a video that already has symptoms leaves
+both sets in the database, attributed to their respective providers, and the
+video is double-counted in aggregates. Delete the old rows first if you intend
+to replace rather than add:
+
+```sql
+DELETE FROM symptoms WHERE video_id = <id> AND extractor_provider = '<old>';
+```
+
 ### Analysis and Statistics
 
 ```bash
@@ -549,7 +567,7 @@ uv run python scripts/retranscribe.py --video-ids 217 239 --backup --provider ol
 | `--start-from N` | Start from video ID N (skip earlier) |
 | `--video-ids` | Process only specific video IDs |
 | `--limit N` | Process only first N videos |
-| `--provider` | LLM provider: ollama, deepseek, or anthropic (default: ollama) |
+| `--provider` | LLM provider: ollama, deepseek, minimax, llamacpp, or anthropic (default: ollama) |
 | `--model` | LLM model (default: gpt-oss:20b) |
 
 This ensures dataset consistency for publication.
@@ -956,6 +974,174 @@ uv run python pipeline.py run --urls-file urls.txt --provider deepseek --model d
 | `deepseek-reasoner` | DeepSeek-V3.2 thinking mode, deep reasoning | ~$0.55/M input, $2.19/M output |
 
 DeepSeek is a great middle-ground between free local models (Ollama) and premium APIs (Anthropic).
+
+## Running with MiniMax
+
+MiniMax exposes an OpenAI-compatible chat endpoint, so it shares the DeepSeek
+code path.
+
+```bash
+# .env
+MINIMAX_API_KEY=...
+MINIMAX_MODEL=MiniMax-M3
+MINIMAX_URL=https://api.minimax.io/v1
+```
+
+```bash
+uv run python pipeline.py extract --all --provider minimax
+```
+
+MiniMax is also the default judge for `scripts/verify_clips.py`, which gates
+montage candidates on whether the transcript really is someone describing their
+own illness hardship.
+
+## Running with llama.cpp (Local, Grammar-Constrained)
+
+A local `llama-server` instance. **This is not Ollama** — despite often serving
+the same model families, `llama-server` speaks the OpenAI wire format:
+`/v1/chat/completions`, with no `/api/generate`, `/api/chat` or `/api/tags`
+(all return 404). Hence `LLAMACPP_URL` includes `/v1` and the provider uses the
+OpenAI SDK rather than the Ollama code path.
+
+### Setup
+
+```bash
+llama-server --model /path/to/gpt-oss-120b-MXFP4.gguf --alias gpt-oss-120b \
+    --n-gpu-layers 99 --n-cpu-moe 26 --ctx-size 32768 --threads 20 \
+    --jinja --host 127.0.0.1 --port 8081
+```
+
+```bash
+# .env
+EXTRACTOR_PROVIDER=llamacpp
+LLAMACPP_URL=http://127.0.0.1:8081/v1
+LLAMACPP_MODEL=gpt-oss-120b
+```
+
+```bash
+# Bounded trial run -- recommended before any large pass
+uv run python pipeline.py extract --all --provider llamacpp --limit 20
+```
+
+### Why use it: guaranteed-valid output
+
+llama.cpp compiles a JSON Schema into a GBNF grammar and constrains the
+**sampler**, so malformed output is not merely unlikely but unrepresentable.
+`build_combined_extraction_schema()` in `extractor.py` enumerates all symptom
+categories and condition codes as schema enums, which means an invented category
+**cannot be sampled at all**. No other provider offers this guarantee, and the
+combined extraction path parses the response with a plain `json.loads` — no
+repair pass, because there is nothing for one to fix.
+
+`CONDITION_CODES` is a single module constant that renders both the prompt text
+and the schema enum, so the two cannot drift apart. If they did, the grammar
+would forbid exactly the vocabulary the prompt requested.
+
+### Two performance facts worth knowing
+
+**`reasoning_effort` is a large, free speedup.** gpt-oss reasons before answering
+and those tokens count against `max_tokens`. Measured on the real combined
+extraction prompt, same transcript, same result: **low 13.7s vs high 52.5s
+(3.8x)**. Reasoning is returned in a separate `reasoning_content` field, so
+`content` needs no stripping. Default is `low`.
+
+**The parallel slots are a trap.** The server reports `total_slots: 4`, each with
+its own 32k context, which looks like 4x throughput. It is not — with
+`--n-cpu-moe 26`, 59GB of weights do not fit a 24GB card, so MoE layers execute
+on CPU and concurrent requests contend for one saturated memory-bandwidth path.
+Measured on the same 4 transcripts:
+
+| workers | wall   | per-request avg | throughput |
+|---------|--------|-----------------|------------|
+| 1       | 278.8s | 69.7s           | 0.9/min    |
+| 4       | 330.9s | 294.2s          | 0.7/min    |
+
+Batching was **19% slower**. `LLAMACPP_CONCURRENCY` therefore defaults to `1`
+and the extractor caps its worker pool accordingly. Raise it only if the model
+becomes fully GPU-resident (drop `--n-cpu-moe`, or use a smaller quant).
+
+### When to reach for it
+
+Roughly **60-100s per transcript**, i.e. ~1/min, so a full-corpus pass is a
+multi-day run where DeepSeek or MiniMax would take hours. Use llama.cpp for
+local, private, or high-assurance extraction on **subsets** — the reason to
+choose it is the guaranteed-valid category vocabulary, not speed.
+
+## Additional Tooling
+
+Scripts beyond the core pipeline. Each supports `--help`.
+
+### Longitudinal tracking
+
+| Script     | Purpose                                                                                                                |
+|------------|------------------------------------------------------------------------------------------------------------------------|
+| `track.py` | Creator watchlist for longitudinal tracking, with per-creator cadence. Subcommands: `add`, `list`, `snapshot`, `trend` |
+
+Engagement snapshots feed diffusion analysis — repeated view/like counts over
+time for the same videos and creators.
+
+```bash
+uv run python scripts/track.py add chronically.roxii --interval-days 7
+uv run python scripts/track.py snapshot      # record current stats
+uv run python scripts/track.py trend --creator chronically.roxii
+```
+
+### Video reuse permissions
+
+`check_permissions.py` records each video's `duetEnabled` / `stitchEnabled` /
+`downloadSetting` from TikTok's rehydration payload. These are **not** exposed
+by yt-dlp and do not affect whether a video appears in search, so a scraped
+corpus mixes permissioned and non-permissioned videos with no way to tell them
+apart. This turns "assume reuse is allowed" into a filterable database fact.
+
+```bash
+uv run python scripts/check_permissions.py init     # add the columns
+uv run python scripts/check_permissions.py check    # every unchecked video
+uv run python scripts/check_permissions.py check --embedded-only
+uv run python scripts/check_permissions.py report
+```
+
+Important behaviours:
+
+- **Resumable.** Already-checked videos are excluded, so rerunning the same
+  command continues where it stopped.
+- **Fetch failures are not denials.** A failed fetch writes nothing, so it is
+  retried on the next pass rather than being recorded as "no reuse".
+- **UNKNOWN is distinct from denied.** A readable page with unreadable
+  permissions is stored as NULL, not `false`. Only `--recheck` revisits those.
+- Rate-limited by design (`--min-delay` / `--max-delay`, default 1.5-3.5s).
+  A full pass over ~73k videos takes roughly 3 days; run it detached.
+
+### Semantic search and montage assembly
+
+Tooling for building supercuts from the corpus (used to assemble a
+chronic-illness montage synced to a song).
+
+| Script                 | Purpose                                                                                                      |
+|------------------------|--------------------------------------------------------------------------------------------------------------|
+| `semantic_match.py`    | Semantic query-to-clip matching over transcript segments using pgvector                                      |
+| `lyric_match.py`       | Match song lyrics to transcript segments, producing a candidate edit list                                    |
+| `verify_clips.py`      | LLM yes/no gate: is this really someone describing their own illness hardship? Cached in `clip_verification` |
+| `build_montage.py`     | Select N unique clips to fill a song, maximising creator diversity                                           |
+| `merge_montage.py`     | Merge verified montage CSVs into an exact-length clip list                                                   |
+| `add_creator_clips.py` | Append a named creator's best on-theme clips, ranked by similarity rather than views                         |
+| `fill_gaps.py`         | Backfill lyric lines that no candidate reached at the strict threshold                                       |
+| `make_clips.py`        | Cut clips with ffmpeg from a match CSV, normalised and ready for assembly                                    |
+
+`verify_clips.py` matters more than it looks: embedding distance finds
+topically *nearby* speech, which includes clinicians, educators, product plugs
+and recovery updates. In practice this gate rejected **220 of 348** candidates.
+
+Literal query phrases live in `data/lyrics/suffering_themes.md` — figurative
+lyrics match poorly, so these are phrased the way people actually speak.
+
+### Maintenance and experiments
+
+| Script                       | Purpose                                                                                                        |
+|------------------------------|----------------------------------------------------------------------------------------------------------------|
+| `audio_experiment.py`        | Stratified A/B harness for transcription preprocessing (baseline / VAD / demucs), plus a VAD threshold `sweep` |
+| `backfill_transcripts.py`    | Rebuild database rows from transcript JSON files on disk                                                       |
+| `recalculate_concordance.py` | Recalculate symptom concordance for all videos                                                                 |
 
 ## Output
 
